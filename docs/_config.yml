@@ -1,0 +1,7 @@
+title: E-repetitor
+description: Платформа для репетиторов, учеников и родителей
+lang: ru
+url: https://zaladdin.github.io
+baseurl: /E-repetitor
+theme: jekyll-theme-minimal
+show_downloads: false
