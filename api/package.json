@@ -1,0 +1,38 @@
+{
+  "name": "e-repetitor-api",
+  "version": "0.1.0",
+  "private": true,
+  "engines": { "node": ">=22.13.0" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/main.js",
+    "dev": "npm run build && npm start",
+    "migrate": "npm run build && node dist/src/migrate.js",
+    "admin": "npm run build && node dist/src/admin.cli.js",
+    "backup:verify": "npm run build && node dist/src/backup.cli.js",
+    "test": "npm run build && node --test --test-concurrency=1 dist/test/*.test.js",
+    "check": "npm test"
+  },
+  "dependencies": {
+    "@nestjs/common": "12.0.4",
+    "@nestjs/core": "12.0.4",
+    "@nestjs/platform-express": "12.0.4",
+    "@nestjs/swagger": "12.0.1",
+    "@node-rs/argon2": "2.2.1",
+    "class-transformer": "0.5.1",
+    "class-validator": "0.15.1",
+    "dotenv": "18.0.3",
+    "helmet": "8.3.0",
+    "nodemailer": "10.0.10",
+    "pg": "8.23.0",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.6",
+    "@types/node": "22.20.4",
+    "@types/nodemailer": "8.0.2",
+    "@types/pg": "8.23.1",
+    "typescript": "6.0.3"
+  }
+}

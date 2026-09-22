@@ -9,10 +9,14 @@
 # JavaScript dependencies and generated output
 node_modules/
 .next/
+next-env.d.ts
 dist/
 build/
 coverage/
 *.tsbuildinfo
+out/
+.qa/
+.local/
 
 # Python environments and caches
 .venv/

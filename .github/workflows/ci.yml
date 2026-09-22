@@ -1,0 +1,50 @@
+name: Application checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+  api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: e_repetitor
+          POSTGRES_PASSWORD: ci-only-ephemeral-password
+          POSTGRES_DB: e_repetitor_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U e_repetitor -d e_repetitor_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://e_repetitor:ci-only-ephemeral-password@127.0.0.1:5432/e_repetitor_test
+      TEST_DATABASE_URL: postgresql://e_repetitor:ci-only-ephemeral-password@127.0.0.1:5432/e_repetitor_test
+      WEB_ORIGIN: http://127.0.0.1:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - run: npm ci --ignore-scripts
+        working-directory: api
+      - run: npm run build
+        working-directory: api
+      - run: npm test
+        working-directory: api
