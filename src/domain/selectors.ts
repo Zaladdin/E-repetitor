@@ -1,3 +1,5 @@
+
+import { translate } from '@/lib/i18n';
 import {
   effectiveEnrollmentStatus, requireProfile,
   type Actor, type DemoState, type Enrollment, type EnrollmentStatus, type ParentConnectionStatus,
@@ -41,8 +43,8 @@ export interface OutgoingRequestView {
 function toStudentEnrollment(state: DemoState, item: Enrollment, now: Date): StudentEnrollmentView {
   return {
     id: item.id,
-    subjectName: state.subjects.find((subject) => subject.id === item.subjectId)?.name ?? "Предмет недоступен",
-    teacherName: state.teachers.find((teacher) => teacher.id === item.teacherId)?.name ?? "Преподаватель недоступен",
+    subjectName: state.subjects.find((subject) => subject.id === item.subjectId)?.name ?? translate("Предмет недоступен"),
+    teacherName: state.teachers.find((teacher) => teacher.id === item.teacherId)?.name ?? translate("Преподаватель недоступен"),
     status: effectiveEnrollmentStatus(item, now),
   };
 }
@@ -56,7 +58,7 @@ export function getTeacherEnrollments(state: DemoState, actor: Actor, now = new 
     return {
       id: item.id,
       publicId: student?.publicId ?? "",
-      subjectName: state.subjects.find((subject) => subject.id === item.subjectId)?.name ?? "Предмет недоступен",
+      subjectName: state.subjects.find((subject) => subject.id === item.subjectId)?.name ?? translate("Предмет недоступен"),
       status,
       ...(hasAcceptedRelationship ? { studentName: student?.name, notesPrivate: item.notesPrivate } : {}),
     };
@@ -83,12 +85,12 @@ export function getIncomingRequests(state: DemoState, actor: Actor, now = new Da
   const student = requireProfile(state, actor, "student");
   const enrollments: IncomingRequestView[] = state.enrollments.filter((item) => item.studentId === student.id && effectiveEnrollmentStatus(item, now) === "pending").map((item) => ({
     id: item.id, kind: "enrollment", createdAt: item.createdAt,
-    name: state.teachers.find((teacher) => teacher.id === item.teacherId)?.name ?? "Преподаватель недоступен",
-    subjectName: state.subjects.find((subject) => subject.id === item.subjectId)?.name ?? "Предмет недоступен",
+    name: state.teachers.find((teacher) => teacher.id === item.teacherId)?.name ?? translate("Преподаватель недоступен"),
+    subjectName: state.subjects.find((subject) => subject.id === item.subjectId)?.name ?? translate("Предмет недоступен"),
   }));
   const parents: IncomingRequestView[] = state.parentConnections.filter((item) => item.studentId === student.id && item.status === "pending").map((item) => ({
     id: item.id, kind: "parent", createdAt: item.createdAt,
-    name: state.parents.find((parent) => parent.id === item.parentId)?.name ?? "Родитель недоступен",
+    name: state.parents.find((parent) => parent.id === item.parentId)?.name ?? translate("Родитель недоступен"),
   }));
   return [...enrollments, ...parents];
 }
@@ -99,7 +101,7 @@ export function getOutgoingRequests(state: DemoState, actor: Actor, now = new Da
     return state.enrollments.filter((item) => item.teacherId === teacher.id).map((item) => ({
       id: item.id, kind: "enrollment", status: effectiveEnrollmentStatus(item, now),
       publicId: state.students.find((student) => student.id === item.studentId)?.publicId ?? "",
-      subjectName: state.subjects.find((subject) => subject.id === item.subjectId)?.name ?? "Предмет недоступен",
+      subjectName: state.subjects.find((subject) => subject.id === item.subjectId)?.name ?? translate("Предмет недоступен"),
     }));
   }
   const parent = requireProfile(state, actor, "parent");

@@ -27,6 +27,26 @@ describe('account HTTP client', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it('submits the required teacher profile and initial subject with registration', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json({ message: 'Проверьте почту.' }));
+    const data = { name: 'Анна Иванова', email: 'anna@example.test', password: 'test-password', role: 'teacher' as const,
+      phone: '+994501234567', birthDate: '1990-02-28', subject: 'Математика', acceptTerms: true, acceptPrivacy: true };
+    await createAccountApi('https://api.example', fetcher).register(data);
+    expect(fetcher).toHaveBeenCalledWith('https://api.example/auth/register', expect.objectContaining({
+      method: 'POST', body: JSON.stringify(data), headers: expect.objectContaining({ 'X-Requested-With': 'ERepetitor' }),
+    }));
+    expect(fetcher.mock.calls[0]![1]!.headers).not.toHaveProperty('X-Account-ID');
+  });
+
+  it('binds additional teacher-role profile data to the current account', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json({ id: 'account-a', roles: ['student', 'teacher'] }));
+    const data = { role: 'teacher' as const, phone: '+994501234567', birthDate: '1990-02-28', subject: 'Физика' };
+    await createAccountApi('https://api.example', fetcher).addRole('account-a', data);
+    expect(fetcher).toHaveBeenCalledWith('https://api.example/me/roles', expect.objectContaining({
+      method: 'POST', body: JSON.stringify(data), headers: expect.objectContaining({ 'X-Account-ID': 'account-a', 'X-Requested-With': 'ERepetitor' }),
+    }));
+  });
+
   it('shares a rotating refresh request between simultaneous expired requests', async () => {
     let finishRefresh!: (response: Response) => void;
     let refreshed = false;
@@ -139,7 +159,7 @@ describe('account HTTP client', () => {
   it('binds role changes and both logout actions without binding session discovery', async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => json({ message: 'ok' }));
     const api = createAccountApi('https://api.example', fetcher);
-    await api.addRole('account-a', 'parent');
+    await api.addRole('account-a', { role: 'parent' });
     await api.logout('account-a');
     await api.logoutAll('account-a');
     await api.current();

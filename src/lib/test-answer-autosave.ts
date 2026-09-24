@@ -1,3 +1,4 @@
+import { translate } from '@/lib/i18n';
 import type { AttemptMutation, TestAnswer } from './account-tests';
 
 /** One in-flight snapshot at a time. Flush also drains edits made while saving. */
@@ -23,7 +24,7 @@ export class TestAnswerAutosave {
   dispose() { this.disposed = true; }
 
   flush(): Promise<void> {
-    if (this.disposed) return Promise.reject(new Error('Редактор ответов закрыт.'));
+    if (this.disposed) return Promise.reject(new Error(translate("Редактор ответов закрыт.")));
     if (this.pending) return this.pending;
     if (!this.dirty) return Promise.resolve();
     const pending = this.drain();
@@ -32,7 +33,7 @@ export class TestAnswerAutosave {
     void pending.then(() => { if (this.pending === pending) this.pending = null; }, () => { if (this.pending === pending) this.pending = null; });
     return pending;
   }
-  private assertActive() { if (this.disposed) throw new Error('Редактор ответов закрыт.'); }
+  private assertActive() { if (this.disposed) throw new Error(translate("Редактор ответов закрыт.")); }
   private async drain() {
     this.assertActive();
     while (this.dirty) {

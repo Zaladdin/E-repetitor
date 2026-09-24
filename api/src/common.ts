@@ -7,7 +7,7 @@ import { Database } from './database';
 export type Role = 'teacher' | 'student' | 'parent';
 export interface Account {
   id: string; name: string; email: string; status: string; roles: Role[]; isAdmin: boolean;
-  profiles: { teacher?: { id: string; timezone: string }; student?: { id: string; publicId: string }; parent?: { id: string } };
+  profiles: { teacher?: { id: string; timezone: string; phone: string | null; birthDate: string | null }; student?: { id: string; publicId: string }; parent?: { id: string } };
 }
 export interface ApiRequest extends Request { requestId: string; userId?: string; sessionId?: string }
 export class ApiError extends HttpException {

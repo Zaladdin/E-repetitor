@@ -1,10 +1,14 @@
 'use client';
 
+import { useI18n } from './locale-provider';
+
+
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { accountApi, accountErrorMessage, accountSessionChanged, isStaleAccountRequest } from '@/lib/account-api';
 import { NOTIFICATION_LABELS, type NotificationPreference } from '@/lib/account-notifications';
 
 export function AccountNotificationPreferences({ accountId, onSessionChanged }: { accountId: string; onSessionChanged: () => void }) {
+  const { t } = useI18n();
   const [items, setItems] = useState<NotificationPreference[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -20,14 +24,15 @@ export function AccountNotificationPreferences({ accountId, onSessionChanged }: 
     return () => { alive = false; };
   }, [accountId, revision]);
   return <div className="notification-preferences">
-    <p className="muted">Настройки общие для всех ваших ролей. Уведомления в кабинете включены по умолчанию, письма можно включить отдельно.</p>
-    <p className="muted">Изменения действуют на новые события. Отключение писем также отменяет ещё не отправленные письма этого типа. Прежние уведомления в кабинете сохраняются, пока доступно обучение.</p>
-    {loading ? <p role="status">Загружаем настройки…</p> : error ? <div><p role="alert" className="form-error">{error}</p><button className="text-button" onClick={() => { setLoading(true); setError(''); setRevision(value => value + 1); }}>Повторить загрузку</button></div>
+    <p className="muted">{t("Настройки общие для всех ваших ролей. Уведомления в кабинете включены по умолчанию, письма можно включить отдельно.")}</p>
+    <p className="muted">{t("Изменения действуют на новые события. Отключение писем также отменяет ещё не отправленные письма этого типа. Прежние уведомления в кабинете сохраняются, пока доступно обучение.")}</p>
+    {loading ? <p role="status">{t("Загружаем настройки…")}</p> : error ? <div><p role="alert" className="form-error">{t(error)}</p><button className="text-button" onClick={() => { setLoading(true); setError(''); setRevision(value => value + 1); }}>{t("Повторить загрузку")}</button></div>
       : <div className="notification-preference-list">{items.map(item => <PreferenceRow key={item.type} item={item} accountId={accountId} onSessionChanged={onSessionChanged} />)}</div>}
   </div>;
 }
 
 function PreferenceRow({ item, accountId, onSessionChanged }: { item: NotificationPreference; accountId: string; onSessionChanged: () => void }) {
+  const { t } = useI18n();
   const id = useId();
   const [saved, setSaved] = useState(item);
   const [draft, setDraft] = useState({ inApp: item.inApp, email: item.email });
@@ -48,7 +53,7 @@ function PreferenceRow({ item, accountId, onSessionChanged }: { item: Notificati
       if (!result) throw new Error('Missing notification preference');
       if (!alive.current) return;
       setSaved(result); setDraft({ inApp: result.inApp, email: result.email });
-      setMessage(refresh ? 'Загружены актуальные настройки этого типа.' : 'Настройки сохранены.');
+      setMessage(refresh ? t("Загружены актуальные настройки этого типа.") : t("Настройки сохранены."));
     } catch (failure) {
       if (!alive.current || isStaleAccountRequest(failure)) return;
       if (accountSessionChanged(failure)) onSessionChanged(); else setError(accountErrorMessage(failure));
@@ -56,13 +61,13 @@ function PreferenceRow({ item, accountId, onSessionChanged }: { item: Notificati
   }
   function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (changed) void run(false); }
   return <form className="notification-preference-row" onSubmit={submit} aria-busy={busy} aria-labelledby={`${id}-title`}>
-    <div><h3 id={`${id}-title`}>{NOTIFICATION_LABELS[item.type]}</h3>{item.type === 'lesson_reminder' && <p>В течение часа до начала занятия.</p>}{item.type === 'test_assigned' && <p>Только для роли ученика.</p>}</div>
-    <fieldset disabled={busy}><legend className="sr-only">Каналы: {NOTIFICATION_LABELS[item.type]}</legend>
-      <label><input type="checkbox" checked={draft.inApp} onChange={event => { setDraft(value => ({ ...value, inApp: event.target.checked })); setMessage(''); }} />В кабинете</label>
-      <label><input type="checkbox" checked={draft.email} onChange={event => { setDraft(value => ({ ...value, email: event.target.checked })); setMessage(''); }} />По email</label>
-      <button className="button secondary small" type="submit" disabled={!changed}>{busy ? 'Сохраняем…' : 'Сохранить'}</button>
+    <div><h3 id={`${id}-title`}>{t(NOTIFICATION_LABELS[item.type])}</h3>{item.type === 'lesson_reminder' && <p>{t("В течение часа до начала занятия.")}</p>}{item.type === 'test_assigned' && <p>{t("Только для роли ученика.")}</p>}</div>
+    <fieldset disabled={busy}><legend className="sr-only">{t("Каналы:")}{' '}{t(NOTIFICATION_LABELS[item.type])}</legend>
+      <label><input type="checkbox" checked={draft.inApp} onChange={event => { setDraft(value => ({ ...value, inApp: event.target.checked })); setMessage(''); }} />{t("В кабинете")}</label>
+      <label><input type="checkbox" checked={draft.email} onChange={event => { setDraft(value => ({ ...value, email: event.target.checked })); setMessage(''); }} />{t("По email")}</label>
+      <button className="button secondary small" type="submit" disabled={!changed}>{busy ? t("Сохраняем…") : t("Сохранить")}</button>
     </fieldset>
-    {error && <div className="notification-preference-feedback"><p role="alert" className="form-error">{error}</p><button type="button" className="text-button" disabled={busy} onClick={() => void run(true)}>Загрузить актуальные настройки этого типа</button><p className="muted">Это заменит несохранённые изменения в этой строке.</p></div>}
-    <p className="notification-preference-feedback" role="status">{message}</p>
+    {error && <div className="notification-preference-feedback"><p role="alert" className="form-error">{t(error)}</p><button type="button" className="text-button" disabled={busy} onClick={() => void run(true)}>{t("Загрузить актуальные настройки этого типа")}</button><p className="muted">{t("Это заменит несохранённые изменения в этой строке.")}</p></div>}
+    <p className="notification-preference-feedback" role="status">{t(message)}</p>
   </form>;
 }

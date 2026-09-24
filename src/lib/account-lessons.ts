@@ -1,3 +1,5 @@
+import { translate, localeTag } from './i18n';
+
 export type LessonStatus = 'scheduled' | 'completed' | 'student_absent' | 'student_cancelled' | 'teacher_cancelled' | 'rescheduled';
 export type AttendanceStatus = 'present' | 'absent' | 'excused' | 'cancelled';
 
@@ -40,7 +42,7 @@ export function localDateTimeInput(date: Date): string {
 
 function parseLocal(value: string): Date {
   const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
-  if (!match) throw new Error('Укажите корректные дату и время.');
+  if (!match) throw new Error(translate("Укажите корректные дату и время."));
   const [, year, month, day, hour, minute] = match.map(Number);
   const date = new Date(0);
   date.setFullYear(year, month - 1, day);
@@ -48,7 +50,7 @@ function parseLocal(value: string): Date {
   // Date normalizes impossible calendar dates and local times in a DST gap.
   // Round-trip validation ensures the scheduled instant is the time the user entered.
   if (year < 1 || localDateTimeInput(date) !== value) {
-    throw new Error('Такой даты или времени нет в вашем часовом поясе. Выберите другое время.');
+    throw new Error(translate("Такой даты или времени нет в вашем часовом поясе. Выберите другое время."));
   }
   return date;
 }
@@ -63,7 +65,7 @@ export function localInputToIso(value: string): string {
     if (otherOffset !== offset) {
       const alternative = new Date(date.getTime() + (otherOffset - offset) * 60_000);
       if (localDateTimeInput(alternative) === value) {
-        throw new Error('Это время повторяется при переводе часов. Выберите время вне перехода.');
+        throw new Error(translate("Это время повторяется при переводе часов. Выберите время вне перехода."));
       }
     }
   }
@@ -84,6 +86,6 @@ export function lessonWeek(value: string): { from: string; to: string; label: st
   end.setDate(end.getDate() + 7);
   const lastDay = new Date(end);
   lastDay.setDate(lastDay.getDate() - 1);
-  const format = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+  const format = new Intl.DateTimeFormat(localeTag(), { day: 'numeric', month: 'long', year: 'numeric' });
   return { from: start.toISOString(), to: end.toISOString(), label: `${format.format(start)} — ${format.format(lastDay)}` };
 }

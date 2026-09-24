@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { accountErrorMessage, accountSessionChanged, isStaleAccountRequest } from '@/lib/account-api';
+import { localeTag } from '@/lib/i18n';
 
 export type AdminRequest = <T>(request: Promise<T>) => Promise<T>;
 export interface AdminContextProps { accountId: string; guard: AdminRequest; onSessionChanged: () => void }
@@ -28,4 +29,4 @@ export function useAdminValue<T>(fetchValue: () => Promise<T>, onSessionChanged:
   return { value, loading, error, reload };
 }
 
-export const adminDate = (value: string) => new Date(value).toLocaleString('ru-RU', { dateStyle: 'medium', timeStyle: 'short' });
+export const adminDate = (value: string) => new Date(value).toLocaleString(localeTag(), { dateStyle: 'medium', timeStyle: 'short' });

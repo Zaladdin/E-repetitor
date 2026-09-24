@@ -73,7 +73,7 @@ development) because cookies use `SameSite=Strict`.
 
 | Method | Path below `/api/v1` | Body | Result |
 | --- | --- | --- | --- |
-| POST | `/auth/register` | `name,email,password,role,acceptTerms:true,acceptPrivacy:true` | 202 `{message}` |
+| POST | `/auth/register` | `name,email,password,role,acceptTerms:true,acceptPrivacy:true`; teachers also require `phone,birthDate,subject` | 202 `{message}` |
 | POST | `/auth/verify-email` | `token` | 200 `{message}` |
 | POST | `/auth/resend-verification` | `email` | 202 `{message}` |
 | POST | `/auth/login` | `email,password` | 200 `{user: Account}` and cookies |
@@ -93,7 +93,7 @@ development) because cookies use `SameSite=Strict`.
 | GET | `/notification-preferences` | — | `items:[{type,inApp,email,version}]` |
 | PATCH | `/notification-preferences/:type` | `inApp,email,version` | Preference row; stale version 409 |
 | GET | `/overview?role=parent&studentId=UUID` | — | `OverviewView`; studentId optional, parent only |
-| POST | `/me/roles` | `role` | `Account` |
+| POST | `/me/roles` | `role`; first-time teacher role also requires `phone,birthDate,subject` | `Account` |
 | GET | `/subjects?limit=100&offset=0` | — | `{items:[{id,name}],total,limit,offset}` |
 | POST | `/subjects` | `name` | 201 `{id,name}` |
 | GET | `/enrollments?role=teacher&limit=50&offset=0` | — | `{items:EnrollmentView[],total,limit,offset}` |
@@ -111,10 +111,28 @@ development) because cookies use `SameSite=Strict`.
 | POST | `/invitations/activate` | `token,name,password,acceptTerms:true,acceptPrivacy:true,acceptEnrollment:true` | 200 `{message}` |
 
 `Account` has `id,name,email,status,roles,isAdmin` and `profiles` with optional
-`teacher:{id,timezone}`, `student:{id,publicId}`, `parent:{id}`. Roles are
+`teacher:{id,timezone,phone,birthDate}`, `student:{id,publicId}`, `parent:{id}`. Roles are
 `teacher`, `student`, `parent`. Adding a role only affects the authenticated
 user and is idempotent. No endpoint accepts owner/user/teacher IDs from the client.
 Subject listings only return subjects owned by that session's teacher profile.
+
+Teacher registration requires a full name in `name`, an international `phone`
+number (8–15 digits after `+`, first digit nonzero), a Gregorian calendar
+`birthDate` in `YYYY-MM-DD` format no later than the current UTC day, and a
+first `subject` (1–100 characters). Spaces, parentheses and hyphens in phone
+input are removed before storage. No age cutoff or mandatory patronymic is imposed.
+The account, teacher profile, initial subject, verification token and audit events
+commit together; a failure rolls back the entire registration. Students and parents
+retain the previous registration contract. Additional subjects use `POST /subjects`.
+
+Migration 011 adds nullable columns without changing existing records. Legacy
+teachers continue to sign in with `phone:null,birthDate:null`. The private fields
+are exposed only in the owning account response, not in student/parent subject
+or connection views. Adding a new teacher role requires the same details and
+creates its first subject atomically; repeating an existing role request can omit
+them and never overwrites details or creates another subject. The migration is
+forward-only: a previous application release may be restored while retaining
+these unused nullable columns, without dropping collected personal data.
 
 Errors use `{error:{code,message,request_id}}`. Unknown fields are rejected.
 The login error does not distinguish an unknown email, wrong password, or an
@@ -424,6 +442,33 @@ totals or debt inference. Live attempts remain available after enrollment closur
 expired attempts consume their limit, soft due dates do not prohibit starts.
 The overview never persists lazy expiry or changes attendance/payment state.
 No new migration is needed. See [overview behavior](../docs/OVERVIEW.md).
+
+## Lesson packages
+
+Migration `010_lesson_packages.sql` adds a package sharing its ID with a single
+manual `payment_records` row and an append-only quantity ledger. No online payments.
+
+| Method / path | Contract |
+| --- | --- |
+| GET `/packages` | Required `role`, optional `enrollmentId`, `limit`/`offset`; authorized role-scoped balances |
+| POST `/packages` | Teacher: `requestId`, `enrollmentId`, `title`, `lessonCount` (1–1000), required `amountMinor` and `currency`; creates package, payment and initial credit atomically |
+| GET `/packages/:id/lessons` | Owning teacher: paginated ended completed/absent lessons without an active debit in any package |
+| POST `/packages/:id/charges` | `requestId`, package `version`, `lessonId`, `lessonVersion`, optional private `reason` (required for absence); debits one lesson |
+| POST `/packages/:id/reversals` | `requestId`, `version`, `entryId`, required private `reason`; adds compensating credit |
+| POST `/packages/:id/close` | `version`, required private `reason`; forbids new debits, retains balance/history |
+| GET `/packages/:id/history` | Required `role`, `limit`/`offset`; sanitized quantity history for family, private reasons only for owner |
+
+Writes return the current `PackageView`; creation returns 201, other writes 200.
+`version` protects quantity changes, while `paymentVersion` belongs to the existing
+manual payment PATCH endpoint. A successful debit does not change the paid checkbox.
+Charges may be explicitly confirmed for unpaid packages. Attendance itself never
+charges a package. Reversals remain possible after closure/payment cancellation.
+
+Mutation lock order follows actor user → student → enrollment → lesson → package
+and payment. A locked lesson protects the cross-package active-debit check. Reversal
+targets are unique and contextual foreign keys bind package, enrollment and lesson.
+Request replay checks precede version checks and reject reused keys with new content.
+No physical delete/edit-history endpoint is provided. See [package rules](../docs/PACKAGES.md).
 
 ## Sessions and mail
 

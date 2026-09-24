@@ -1,5 +1,6 @@
 'use client';
 
+import { useI18n } from './locale-provider';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { accountApi, accountErrorMessage, accountSessionChanged, isStaleAccountRequest } from '@/lib/account-api';
 import { ATTEMPT_LABELS, type PublicTestQuestion, type TestAnswer, type TestAttempt } from '@/lib/account-tests';
@@ -11,6 +12,7 @@ interface RunnerProps {
 }
 
 export function TestAttemptRunner(props: RunnerProps) {
+  const { t } = useI18n();
   const [attempt, setAttempt] = useState<TestAttempt | null>(null);
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
@@ -28,10 +30,11 @@ export function TestAttemptRunner(props: RunnerProps) {
   }, [accountId, attemptId, onSessionChanged, revision]);
   const reload = useCallback(() => { setAttempt(null); setError(''); setRevision(value => value + 1); }, []);
   return attempt ? <AttemptEditor key={`${attempt.id}:${revision}`} {...props} initial={attempt} onReload={reload} />
-    : <Modal title="Тест" onClose={props.onClose}>{error ? <><p role="alert" className="form-error">{error}</p><button className="button secondary" onClick={reload}>Повторить загрузку</button></> : <p role="status">Загружаем попытку…</p>}</Modal>;
+    : <Modal title={t("Тест")} onClose={props.onClose}>{error ? <><p role="alert" className="form-error">{t(error)}</p><button className="button secondary" onClick={reload}>{t("Повторить загрузку")}</button></> : <p role="status">{t("Загружаем попытку…")}</p>}</Modal>;
 }
 
 function AttemptEditor({ accountId, initial, onSessionChanged, onClose, onChanged, onReload }: RunnerProps & { initial: TestAttempt; onReload: () => void }) {
+  const { t } = useI18n();
   const id = useId();
   const [answers, setAnswers] = useState<TestAnswer[]>(initial.answers ?? []);
   const [saveState, setSaveState] = useState<'saved' | 'dirty' | 'saving' | 'error'>('saved');
@@ -145,42 +148,42 @@ function AttemptEditor({ accountId, initial, onSessionChanged, onClose, onChange
   const total = initial.questions?.length ?? 0;
   return <Modal title={initial.title} onClose={requestClose}>
     <div className="account-test-runner">
-      <p className="muted">{initial.subjectName} · {initial.teacherName} · Попытка {initial.number}</p>
-      <p><strong>{ATTEMPT_LABELS[initial.status]}</strong>{initial.topic ? ` · ${initial.topic}` : ''}</p>
+      <p className="muted">{initial.subjectName} · {initial.teacherName} {t(" · Попытка ")}{initial.number}</p>
+      <p><strong>{t(ATTEMPT_LABELS[initial.status])}</strong>{initial.topic ? ` · ${initial.topic}` : ''}</p>
       {initial.instruction && <p className="account-test-instruction">{initial.instruction}</p>}
-      {isStarted && <div className="account-test-save-bar"><span>Отвечено: {answered} из {total}</span>{remaining !== null && <span role="timer" aria-label="Осталось времени">{clock(remaining)}</span>}<span role="status">{saveState === 'saved' ? 'Все ответы сохранены' : saveState === 'saving' ? 'Сохраняем…' : saveState === 'dirty' ? 'Есть несохранённые изменения' : 'Не удалось сохранить ответы'}</span></div>}
-      {isStarted && remaining === 0 && <p role="status" className="form-error">Время вышло. Проверяем состояние попытки на сервере. Сохраняются только ответы, принятые до окончания времени.</p>}
-      {(initial.status === 'expired' || initial.status === 'abandoned') && <p className="account-next-note">Попытка закрыта и учитывается в лимите. Сохранённые ответы остаются в истории.</p>}
-      {!isStarted && initial.status !== 'published' && initial.status !== 'expired' && initial.status !== 'abandoned' && <p className="account-next-note">Ответы сданы. Итоговые баллы и комментарии появятся после публикации преподавателем.</p>}
-      {initial.status === 'published' && initial.score !== undefined && <div className="account-test-result"><strong>{initial.score} из {initial.maxPoints} · {initial.percentage}%</strong>{initial.passed !== undefined && <p>{initial.passed ? 'Проходной балл набран' : 'Проходной балл не набран'}</p>}{initial.comment && <p>{initial.comment}</p>}</div>}
+      {isStarted && <div className="account-test-save-bar"><span>{t("Отвечено: ")}{answered} {t(" из ")}{total}</span>{remaining !== null && <span role="timer" aria-label={t("Осталось времени")}>{clock(remaining)}</span>}<span role="status">{saveState === 'saved' ? t("Все ответы сохранены") : saveState === 'saving' ? t("Сохраняем…") : saveState === 'dirty' ? t("Есть несохранённые изменения") : t("Не удалось сохранить ответы")}</span></div>}
+      {isStarted && remaining === 0 && <p role="status" className="form-error">{t("Время вышло. Проверяем состояние попытки на сервере. Сохраняются только ответы, принятые до окончания времени.")}</p>}
+      {(initial.status === 'expired' || initial.status === 'abandoned') && <p className="account-next-note">{t("Попытка закрыта и учитывается в лимите. Сохранённые ответы остаются в истории.")}</p>}
+      {!isStarted && initial.status !== 'published' && initial.status !== 'expired' && initial.status !== 'abandoned' && <p className="account-next-note">{t("Ответы сданы. Итоговые баллы и комментарии появятся после публикации преподавателем.")}</p>}
+      {initial.status === 'published' && initial.score !== undefined && <div className="account-test-result"><strong>{initial.score} {t(" из ")}{initial.maxPoints} · {initial.percentage}%</strong>{initial.passed !== undefined && <p>{initial.passed ? t("Проходной балл набран") : t("Проходной балл не набран")}</p>}{initial.comment && <p>{initial.comment}</p>}</div>}
 
       <div className="account-test-answer-list">{initial.questions?.map((question, index) => {
         const answer = answers.find(value => value.questionId === question.id);
         const selected = answer?.selectedOptionIds ?? [];
         const grade = initial.grades?.find(value => value.questionId === question.id);
         return <fieldset key={question.id} className="account-test-answer" disabled={!editing || busy || !!confirmation}>
-          <legend>{index + 1}. {question.prompt} <span className="muted">· {question.points} балл.</span></legend>
-          {question.type === 'text' ? <><label className="sr-only" htmlFor={`${id}-${question.id}`}>Ответ на вопрос {index + 1}</label><textarea id={`${id}-${question.id}`} value={answer?.text ?? ''} maxLength={4000} rows={5} onChange={event => change(question, { text: event.target.value })} /></>
+          <legend>{index + 1}. {question.prompt} <span className="muted">· {question.points} {t(" балл.")}</span></legend>
+          {question.type === 'text' ? <><label className="sr-only" htmlFor={`${id}-${question.id}`}>{t("Ответ на вопрос ")}{index + 1}</label><textarea id={`${id}-${question.id}`} value={answer?.text ?? ''} maxLength={4000} rows={5} onChange={event => change(question, { text: event.target.value })} /></>
             : question.options.map(option => <label key={option.id} className="account-test-choice"><input type={question.type === 'single_choice' ? 'radio' : 'checkbox'} name={`${id}-${question.id}`} value={option.id} checked={selected.includes(option.id)} onChange={event => change(question, { selectedOptionIds: question.type === 'single_choice' ? [option.id] : event.target.checked ? [...selected, option.id] : selected.filter(value => value !== option.id) })} /><span>{option.text}</span></label>)}
-          {editing && question.type === 'single_choice' && selected.length > 0 && <button type="button" className="text-button" onClick={() => change(question, { selectedOptionIds: [] })}>Очистить выбор</button>}
-          {question.correctOptionIds !== undefined && <p className="account-test-key">Правильный ответ: {question.options.filter(option => question.correctOptionIds!.includes(option.id)).map(option => option.text).join('; ') || 'Текстовый ответ проверяет преподаватель'}</p>}
+          {editing && question.type === 'single_choice' && selected.length > 0 && <button type="button" className="text-button" onClick={() => change(question, { selectedOptionIds: [] })}>{t("Очистить выбор")}</button>}
+          {question.correctOptionIds !== undefined && <p className="account-test-key">{t("Правильный ответ: ")}{question.options.filter(option => question.correctOptionIds!.includes(option.id)).map(option => option.text).join('; ') || t("Текстовый ответ проверяет преподаватель")}</p>}
           {question.explanation && <p className="account-test-explanation">{question.explanation}</p>}
-          {initial.status === 'published' && grade && <p className="account-test-grade">Баллы: {grade.points} из {question.points}{grade.comment ? ` · ${grade.comment}` : ''}</p>}
+          {initial.status === 'published' && grade && <p className="account-test-grade">{t("Баллы: ")}{grade.points} {t(" из ")}{question.points}{grade.comment ? ` · ${grade.comment}` : ''}</p>}
         </fieldset>;
       })}</div>
-      {error && <div><p ref={errorRef} tabIndex={-1} className="form-error" role="alert">{error}</p><button className="text-button" disabled={busy} onClick={requestReload}>Обновить попытку с сервера</button></div>}
+      {error && <div><p ref={errorRef} tabIndex={-1} className="form-error" role="alert">{t(error)}</p><button className="text-button" disabled={busy} onClick={requestReload}>{t("Обновить попытку с сервера")}</button></div>}
 
       {confirmation && <div className="account-test-confirm" role="group" aria-labelledby={`${id}-confirm-title`} tabIndex={-1} ref={confirmationRef}>
-        <h3 id={`${id}-confirm-title`}>{confirmation === 'submit' ? 'Сдать тест?' : confirmation === 'abandon' ? 'Прекратить попытку?' : confirmation === 'reload' ? 'Загрузить сохранённые ответы?' : 'Закрыть тест?'}</h3>
-        <p>{confirmation === 'submit' ? `После сдачи ответы изменить нельзя. Отвечено ${answered} из ${total}; пропущенные вопросы также попадут на проверку.` : confirmation === 'abandon' ? 'Эта попытка будет использована. Продолжить её позже будет нельзя.' : confirmation === 'reload' ? 'Несохранённые изменения в этом окне будут заменены последними ответами с сервера.' : 'Есть изменения, которые ещё не сохранены. Можно сохранить их перед выходом и продолжить попытку позже, пока не истекло время.'}</p>
-        <div className="form-actions"><button className="button secondary" disabled={busy} onClick={() => setConfirmation(null)}>Остаться</button>
-          {confirmation === 'reload' ? <button className="button" disabled={busy || saveState === 'saving'} onClick={onReload}>Загрузить с сервера</button>
-            : <button className="button" disabled={busy} onClick={() => void finish(confirmation)}>{busy ? 'Подождите…' : confirmation === 'submit' ? 'Сдать тест' : confirmation === 'abandon' ? 'Прекратить' : 'Сохранить и закрыть'}</button>}
-          {confirmation === 'close' && <button className="text-button danger-text" disabled={busy || saveState === 'saving'} onClick={onClose}>Закрыть без сохранения</button>}
+        <h3 id={`${id}-confirm-title`}>{confirmation === 'submit' ? t("Сдать тест?") : confirmation === 'abandon' ? t("Прекратить попытку?") : confirmation === 'reload' ? t("Загрузить сохранённые ответы?") : t("Закрыть тест?")}</h3>
+        <p>{confirmation === 'submit' ? t("После сдачи ответы изменить нельзя. Отвечено {answered} из {total}; пропущенные вопросы также попадут на проверку.", { answered: answered, total: total }) : confirmation === 'abandon' ? t("Эта попытка будет использована. Продолжить её позже будет нельзя.") : confirmation === 'reload' ? t("Несохранённые изменения в этом окне будут заменены последними ответами с сервера.") : t("Есть изменения, которые ещё не сохранены. Можно сохранить их перед выходом и продолжить попытку позже, пока не истекло время.")}</p>
+        <div className="form-actions"><button className="button secondary" disabled={busy} onClick={() => setConfirmation(null)}>{t("Остаться")}</button>
+          {confirmation === 'reload' ? <button className="button" disabled={busy || saveState === 'saving'} onClick={onReload}>{t("Загрузить с сервера")}</button>
+            : <button className="button" disabled={busy} onClick={() => void finish(confirmation)}>{busy ? t("Подождите…") : confirmation === 'submit' ? t("Сдать тест") : confirmation === 'abandon' ? t("Прекратить") : t("Сохранить и закрыть")}</button>}
+          {confirmation === 'close' && <button className="text-button danger-text" disabled={busy || saveState === 'saving'} onClick={onClose}>{t("Закрыть без сохранения")}</button>}
         </div>
       </div>}
-      {!confirmation && <div className="form-actions"><button className="button secondary" disabled={busy} onClick={requestClose}>Закрыть</button>
-        {editing && <><button className="button secondary" disabled={busy || saveState === 'saving'} onClick={() => void flush()}>Сохранить ответы</button><button className="button" disabled={busy} onClick={() => setConfirmation('submit')}>Сдать тест</button><button className="text-button danger-text" disabled={busy} onClick={() => setConfirmation('abandon')}>Прекратить попытку</button></>}
+      {!confirmation && <div className="form-actions"><button className="button secondary" disabled={busy} onClick={requestClose}>{t("Закрыть")}</button>
+        {editing && <><button className="button secondary" disabled={busy || saveState === 'saving'} onClick={() => void flush()}>{t("Сохранить ответы")}</button><button className="button" disabled={busy} onClick={() => setConfirmation('submit')}>{t("Сдать тест")}</button><button className="text-button danger-text" disabled={busy} onClick={() => setConfirmation('abandon')}>{t("Прекратить попытку")}</button></>}
       </div>}
     </div>
   </Modal>;

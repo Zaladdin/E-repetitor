@@ -1,3 +1,5 @@
+
+import { translate } from '@/lib/i18n';
 export type Role = "teacher" | "student" | "parent" | "admin";
 export type UserStatus = "pending_verification" | "active" | "suspended" | "deactivated" | "deleted";
 export type EnrollmentStatus = "pending" | "active" | "rejected" | "expired" | "paused" | "completed" | "cancelled";
@@ -79,7 +81,7 @@ export function validateStudentId(value: string): boolean {
 export function requireActor(state: DemoState, actor: Actor): User {
   const user = state.users.find((item) => item.id === actor.userId);
   if (!user || user.status !== "active" || !user.roles.includes(actor.role)) {
-    throw new DomainError("Этот аккаунт или выбранная роль недоступны.", "FORBIDDEN");
+    throw new DomainError(translate("Этот аккаунт или выбранная роль недоступны."), "FORBIDDEN");
   }
   return user;
 }
@@ -89,13 +91,13 @@ export function getActorProfile(state: DemoState, actor: Actor): Profile {
   const profiles = actor.role === "teacher" ? state.teachers : actor.role === "student" ? state.students : actor.role === "parent" ? state.parents : [];
   const profile = profiles.find((item) => item.userId === actor.userId);
   if (actor.role === "admin") return { id: user.id, userId: user.id, name: user.name };
-  if (!profile) throw new DomainError("Профиль для выбранной роли не найден.", "PROFILE_NOT_FOUND");
+  if (!profile) throw new DomainError(translate("Профиль для выбранной роли не найден."), "PROFILE_NOT_FOUND");
   return { ...profile, userId: actor.userId };
 }
 
 export function requireProfile(state: DemoState, actor: Actor, role: Role): Profile {
   requireActor(state, actor);
-  if (actor.role !== role) throw new DomainError("Это действие недоступно в выбранной роли.", "FORBIDDEN");
+  if (actor.role !== role) throw new DomainError(translate("Это действие недоступно в выбранной роли."), "FORBIDDEN");
   return getActorProfile(state, actor);
 }
 

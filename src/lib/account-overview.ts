@@ -1,4 +1,5 @@
 import type { AccountPage, AccountRole } from './account-api';
+import { translate } from './i18n';
 
 export interface OverviewContext {
   enrollmentId: string; studentName: string; studentPublicId: string; subjectName: string; teacherName: string;
@@ -40,5 +41,5 @@ export function overviewChildSelection(selected: string | null, children: { id: 
 }
 
 export function overviewPaymentLabel({ paid, unpaid }: OverviewPaymentCounts): string {
-  return paid + unpaid === 0 ? 'Записей об оплате пока нет' : `Оплачено: ${paid} · без отметки: ${unpaid}`;
+  return paid + unpaid === 0 ? translate('Записей об оплате пока нет') : translate('Оплачено: {paid} · без отметки: {unpaid}', { paid, unpaid });
 }

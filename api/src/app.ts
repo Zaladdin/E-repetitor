@@ -5,6 +5,8 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { json, urlencoded } from 'express';
 import helmet from 'helmet';
 import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
+import { createWebMiddleware } from './web';
 import { CONFIG, Config } from './config';
 import { Database } from './database';
 import { AccountsService } from './accounts';
@@ -34,11 +36,16 @@ import { NotificationsWorker } from './notifications.worker';
 import { NOTIFICATION_MAIL, NotificationMailDelivery, NotificationSmtpMail } from './notifications.mail';
 import { AdminService } from './admin';
 import { AdminController } from './admin.controllers';
+import { PackagesService } from './packages';
+import { PackagesController } from './packages.controllers';
+import { GroupsService } from './groups';
+import { GroupsController } from './groups.controllers';
 
 export async function createApp(config: Config, mail?: MailDelivery, notificationMail?: NotificationMailDelivery) {
+  const web = config.serveWeb ? await createWebMiddleware(resolve(__dirname, '../../../.local/web'), config.production) : undefined;
   @Module({
-    controllers: [AuthController, AccountController, SubjectsController, HealthController, EnrollmentsController, ParentConnectionsController, ParentChildrenController, TemporaryStudentsController, InvitationsController, LessonsController, TestsController, TestVersionsController, TestAssignmentsController, TestAttemptsController, PaymentsController, OverviewController, NotificationsController, NotificationPreferencesController, AdminController],
-    providers: [{ provide: CONFIG, useValue: config }, Database, AccountsService, AuthService, SessionGuard, ConnectionsService, InvitationsService, LessonsService, TestsService, TestAssignmentsService, TestAttemptsService, PaymentsService, OverviewService, NotificationsService, NotificationsWorker, AdminService,
+    controllers: [AuthController, AccountController, SubjectsController, HealthController, EnrollmentsController, ParentConnectionsController, ParentChildrenController, TemporaryStudentsController, InvitationsController, LessonsController, TestsController, TestVersionsController, TestAssignmentsController, TestAttemptsController, PaymentsController, OverviewController, NotificationsController, NotificationPreferencesController, AdminController, PackagesController, GroupsController],
+    providers: [{ provide: CONFIG, useValue: config }, Database, AccountsService, AuthService, SessionGuard, ConnectionsService, InvitationsService, LessonsService, TestsService, TestAssignmentsService, TestAttemptsService, PaymentsService, OverviewService, NotificationsService, NotificationsWorker, AdminService, PackagesService, GroupsService,
       { provide: NOTIFICATION_MAIL, ...(notificationMail ? { useValue: notificationMail } : { useClass: NotificationSmtpMail }) },
       { provide: MAIL, ...(mail ? { useValue: mail } : { useClass: SmtpMail }) },
       { provide: APP_GUARD, useClass: RateLimitGuard }],
@@ -51,6 +58,7 @@ export async function createApp(config: Config, mail?: MailDelivery, notificatio
     next();
   });
   app.use(helmet());
+  if (web) app.use(web);
   app.enableCors({ origin: config.webOrigin, credentials: true, methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'X-Requested-With', 'X-Account-ID'], exposedHeaders: ['X-Request-ID'] });
   app.use((req: ApiRequest, _res: Response, next: NextFunction) => {

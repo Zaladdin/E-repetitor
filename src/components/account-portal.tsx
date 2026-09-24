@@ -1,8 +1,12 @@
 'use client';
 
+import { LanguageSwitcher, useI18n } from './locale-provider';
+
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowUpRight, BookOpen, GraduationCap, Users } from 'lucide-react';
+import { usePathname, useRouter } from 'next/navigation';
+import { accountSectionFromHash, accountSectionFromPath, accountSectionHref } from '@/lib/account-navigation';
 import { ACCOUNT_SESSION_CHANNEL, accountApi, accountErrorMessage, isExternalAccountSessionChange, isStaleAccountRequest, type Account } from '@/lib/account-api';
 import { consumeAccountLink, subscribeAccountLinks, type AccountEmailLink } from '@/lib/account-link';
 import { AccountFocusVerifier } from '@/lib/account-focus-verifier';
@@ -11,9 +15,16 @@ import { InvitationActivation } from './invitation-activation';
 import { AccountDashboard } from './account-dashboard';
 import { AccountSessionSuspendedContext } from './account-session-context';
 import '@/app/account.css';
+import '@/app/apple-theme.css';
+import '@/app/groups.css';
 
 export function AccountPortal() {
+  const { t } = useI18n();
+  const pathname = usePathname();
+  const router = useRouter();
+  const section = accountSectionFromPath(pathname) ?? 'account-overview-section';
   const [account, setAccount] = useState<Account | null>(null);
+  const [navigationHost, setNavigationHost] = useState<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -31,6 +42,23 @@ export function AccountPortal() {
   }));
   const initialLink = useRef<AccountEmailLink | null | undefined>(undefined);
   const mainRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    mainRef.current?.focus({ preventScroll: true });
+    window.scrollTo(0, 0);
+  }, [pathname]);
+  useEffect(() => {
+    if (!account) return;
+    const followLegacyLink = () => {
+      const target = accountSectionFromHash(window.location.hash, account.isAdmin);
+      if (target) router.replace(accountSectionHref(target));
+      else if ((pathname === '/' || pathname.replace(/\/$/, '') === '/account') && !window.location.hash) {
+        router.replace(accountSectionHref('account-overview-section'));
+      }
+    };
+    followLegacyLink();
+    window.addEventListener('hashchange', followLegacyLink);
+    return () => window.removeEventListener('hashchange', followLegacyLink);
+  }, [account, pathname, router]);
   const revalidateSession = useCallback(() => {
     // Email confirmation/reset is independent of the browser's signed-in account.
     if (initialLink.current) return;
@@ -96,40 +124,40 @@ export function AccountPortal() {
   const sessionSuspended = checkingSession || !!sessionError;
 
   return <div className={`account-shell${account ? ' is-signed-in' : ''}`}>
-    <a href="#account-main" className="skip-link">Перейти к содержимому</a>
-    <header className="account-header"><Link href="/" className="account-logo">E-repetitor<span>Учиться. Преподавать. Быть рядом.</span></Link>
-      <Link href="/demo/" className="account-demo-link">Демо интерфейса<ArrowUpRight size={17} aria-hidden="true" /></Link></header>
-    <div className="account-pilot-bar">Пилотная версия · регистрация и личные аккаунты</div>
+    <a href="#account-main" className="skip-link">{t("Перейти к содержимому")}</a>
+    <header className="account-header">
+      <div className="account-header-brand"><Link href={account ? '/account/overview/' : '/'} className="account-logo">E-repetitor</Link></div>
+      <div id="account-header-navigation" ref={setNavigationHost} hidden={sessionSuspended} inert={sessionSuspended} />
+      <LanguageSwitcher />
+    </header>
     <main id="account-main" ref={mainRef} tabIndex={-1} className="account-main">
-      {notice && <p className="success-message" role="status">{notice}</p>}
-      {loading ? <div className="account-loading" role="status">Открываем ваше пространство…</div>
-        : error ? <section className="account-unavailable"><h1>Не удалось открыть аккаунт</h1><p className="form-error" role="alert">{error}</p><button className="button" onClick={() => { setLoading(true); setRevision((value) => value + 1); }}>Повторить попытку</button><p className="muted">Демонстрация интерфейса доступна по ссылке вверху.</p></section>
+      {notice && <p className="success-message" role="status">{t(notice)}</p>}
+      {loading ? <div className="account-loading" role="status">{t("Открываем ваше пространство…")}</div>
+        : error ? <section className="account-unavailable"><h1>{t("Не удалось открыть аккаунт")}</h1><p className="form-error" role="alert">{t(error)}</p><button className="button" onClick={() => { setLoading(true); setRevision((value) => value + 1); }}>{t("Повторить попытку")}</button></section>
           : link?.kind === 'invite' ? <InvitationActivation key={link.token} token={link.token} onComplete={completeLink} onCancel={() => completeLink()} />
             : link ? <AccountLinkForm key={`${link.kind}:${link.token}`} link={{ kind: link.kind, token: link.token }} onComplete={completeLink} onCancel={() => completeLink()} />
-            : !account ? <div className="account-entry-grid"><AccountAuth onLogin={signedIn} /><AccountIntroduction /></div> : null}
-      {account && checkingSession && <p className="account-loading" role="status">Проверяем вход…</p>}
-      {account && !checkingSession && sessionError && <section className="account-unavailable"><h1>Не удалось проверить вход</h1><p className="form-error" role="alert">{sessionError}</p><p>Открытые формы сохранены в этом окне. Проверьте соединение и повторите попытку.</p><button className="button" onClick={() => void focusVerifier.check(account.id)}>Повторить проверку</button></section>}
+            : !account ? <AccountAuth onLogin={signedIn} /> : null}
+      {account && checkingSession && <p className="account-loading" role="status">{t("Проверяем вход…")}</p>}
+      {account && !checkingSession && sessionError && <section className="account-unavailable"><h1>{t("Не удалось проверить вход")}</h1><p className="form-error" role="alert">{t(sessionError)}</p><p>{t("Открытые формы сохранены в этом окне. Проверьте соединение и повторите попытку.")}</p><button className="button" onClick={() => void focusVerifier.check(account.id)}>{t("Повторить проверку")}</button></section>}
       <AccountSessionSuspendedContext.Provider value={sessionSuspended}>
         <div hidden={sessionSuspended} inert={sessionSuspended}>
-          {account && !loading && !error && !link && <AccountDashboard key={account.id} account={account} onAccountChange={setAccount} onSessionChanged={revalidateSession} onLogout={(message) => {
+          {account && !loading && !error && !link && <AccountDashboard key={account.id} section={section} navigationHost={navigationHost} account={account} onAccountChange={setAccount} onSessionChanged={revalidateSession} onLogout={(message) => {
             focusVerifier.invalidate(); setCheckingSession(false); setSessionError('');
             setAccount(null); setNotice(message); mainRef.current?.focus();
           }} />}
         </div>
       </AccountSessionSuspendedContext.Provider>
     </main>
-    <footer className="account-footer"><span>E-repetitor</span><p>Рабочая версия для тестирования. Используйте вымышленные данные.</p></footer>
+    {!account && !loading && !error && !link && <AccountIntroduction />}
+    <footer className="account-footer"><span>E-repetitor</span><p>{t("Рабочая версия для тестирования. Используйте вымышленные данные.")}</p></footer>
   </div>;
 }
 
 function AccountIntroduction() {
-  return <aside className="account-introduction" aria-labelledby="intro-title">
-    <p className="account-eyebrow">Всё начинается со связи</p>
-    <h2 id="intro-title">Одно пространство.<br />Три точки зрения.</h2>
-    <p className="account-intro-lead">Свой кабинет для каждого участника обучения.</p>
-    <div className="account-intro-role"><BookOpen size={23} aria-hidden="true" /><div><h3>Преподавателю</h3><p>Свои предметы и ученики. Подключение по Student ID и управление обучением.</p></div></div>
-    <div className="account-intro-role"><GraduationCap size={23} aria-hidden="true" /><div><h3>Ученику</h3><p>Один Student ID для разных репетиторов. Вы подтверждаете подключения и доступ родителей.</p></div></div>
-    <div className="account-intro-role"><Users size={23} aria-hidden="true" /><div><h3>Родителю</h3><p>Предметы ребёнка у всех преподавателей в одном кабинете — после его подтверждения.</p></div></div>
-    <div className="account-intro-footnote">Учебные кабинеты с примерами можно посмотреть в демо интерфейса.</div>
+  const { t } = useI18n();
+  return <aside className="account-introduction" aria-label={t("Возможности участников")}>
+    <div className="account-intro-role"><h2>{t("Преподавателю")}</h2><p>{t("Свои предметы и ученики. Расписание, тесты и отметки оплаты в одном кабинете.")}</p></div>
+    <div className="account-intro-role"><h2>{t("Ученику")}</h2><p>{t("Один Student ID для разных репетиторов. Занятия, тесты и результаты по всем предметам.")}</p></div>
+    <div className="account-intro-role"><h2>{t("Родителю")}</h2><p>{t("Все предметы ребёнка, результаты и статусы оплаты — после подтверждения связи.")}</p></div>
   </aside>;
 }

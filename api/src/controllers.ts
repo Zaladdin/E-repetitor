@@ -64,7 +64,7 @@ export class AccountController {
   @Get() me(@Req() req: ApiRequest) { return this.accounts.account(req.userId!); }
   @Post('roles') @HttpCode(200)
   @ApiOperation({ summary: 'Add a role to the authenticated account; idempotent. Admin is never self-assigned.' })
-  addRole(@Body() dto: RoleDto, @Req() req: ApiRequest) { return this.accounts.addRole(req, dto.role); }
+  addRole(@Body() dto: RoleDto, @Req() req: ApiRequest) { return this.accounts.addRole(req, dto.role, dto); }
 }
 
 @ApiTags('Subjects') @ApiCookieAuth() @UseGuards(SessionGuard) @Controller('subjects')

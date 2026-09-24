@@ -3,13 +3,14 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { PoolClient } from 'pg';
 import { Database } from './database';
 import { Account, ApiError, ApiRequest, Role, audit, lockActiveSession, unauthenticated } from './common';
+import { TeacherProfileDetails } from './teacher-profile';
 
 interface AccountRow {
   id: string; name: string; email: string; status: string;
-  teacher_id: string | null; timezone: string | null;
+  teacher_id: string | null; timezone: string | null; phone: string | null; birth_date: string | null;
   student_id: string | null; public_id: string | null; parent_id: string | null; is_admin: boolean;
 }
-const accountQuery = `SELECT u.id,u.name,u.email,u.status,t.id AS teacher_id,t.timezone,
+const accountQuery = `SELECT u.id,u.name,u.email,u.status,t.id AS teacher_id,t.timezone,t.phone,to_char(t.birth_date,'YYYY-MM-DD') AS birth_date,
   s.id AS student_id,s.public_id,p.id AS parent_id,
   EXISTS(SELECT 1 FROM admin_memberships m WHERE m.user_id=u.id) AS is_admin FROM users u
   LEFT JOIN teacher_profiles t ON t.user_id=u.id LEFT JOIN student_profiles s ON s.user_id=u.id
@@ -23,15 +24,23 @@ export class AccountsService {
     const row = result.rows[0];
     if (!row) throw unauthenticated();
     const profiles: Account['profiles'] = {}; const roles: Role[] = [];
-    if (row.teacher_id) { roles.push('teacher'); profiles.teacher = { id: row.teacher_id, timezone: row.timezone! }; }
+    if (row.teacher_id) { roles.push('teacher'); profiles.teacher = { id: row.teacher_id, timezone: row.timezone!, phone: row.phone, birthDate: row.birth_date }; }
     if (row.student_id) { roles.push('student'); profiles.student = { id: row.student_id, publicId: row.public_id! }; }
     if (row.parent_id) { roles.push('parent'); profiles.parent = { id: row.parent_id }; }
     return { id: row.id, name: row.name, email: row.email, status: row.status, roles, profiles, isAdmin: row.is_admin };
   }
-  async createProfile(client: PoolClient, userId: string, role: Role): Promise<void> {
+  async createProfile(client: PoolClient, userId: string, role: Role, details: TeacherProfileDetails = {}): Promise<void> {
     const id = randomUUID();
     if (role === 'teacher') {
-      await client.query('INSERT INTO teacher_profiles(id,user_id) VALUES($1,$2) ON CONFLICT(user_id) DO NOTHING', [id, userId]);
+      const existing = await client.query('SELECT id FROM teacher_profiles WHERE user_id=$1', [userId]);
+      if (existing.rows[0]) return;
+      if (!details.phone || !details.birthDate || !details.subject) {
+        throw new ApiError(400, 'validation_error', 'Укажите телефон, дату рождения и первый предмет преподавателя.');
+      }
+      await client.query('INSERT INTO teacher_profiles(id,user_id,phone,birth_date) VALUES($1,$2,$3,$4)', [id, userId, details.phone, details.birthDate]);
+      const subjectId = randomUUID();
+      await client.query('INSERT INTO subjects(id,teacher_id,name) VALUES($1,$2,$3)', [subjectId, id, details.subject]);
+      await audit(client, userId, 'subject.created', subjectId);
     } else if (role === 'parent') {
       await client.query('INSERT INTO parent_profiles(id,user_id) VALUES($1,$2) ON CONFLICT(user_id) DO NOTHING', [id, userId]);
     } else {
@@ -52,10 +61,10 @@ export class AccountsService {
       throw new ApiError(503, 'id_unavailable', 'Не удалось создать ID ученика. Попробуйте снова.');
     }
   }
-  async addRole(req: ApiRequest, role: Role): Promise<Account> {
+  async addRole(req: ApiRequest, role: Role, details: TeacherProfileDetails = {}): Promise<Account> {
     return this.db.transaction(async client => {
       const userId = await lockActiveSession(client, req);
-      await this.createProfile(client, userId, role);
+      await this.createProfile(client, userId, role, details);
       await audit(client, userId, `profile.${role}.enabled`);
       return this.account(userId, client);
     });

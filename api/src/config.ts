@@ -8,6 +8,7 @@ export interface Config {
   port: number;
   webOrigin: string;
   production: boolean;
+  serveWeb: boolean;
   notificationWorkerEnabled: boolean;
   smtp: { host: string; port: number; secure: boolean; user?: string; password?: string; from: string };
 }
@@ -32,9 +33,11 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (Boolean(env.SMTP_USER) !== Boolean(env.SMTP_PASSWORD)) throw new Error('Both SMTP credentials are required');
   if (production && (!env.SMTP_HOST || !env.MAIL_FROM)) throw new Error('Production SMTP configuration is required');
   if (env.NOTIFICATION_WORKER_ENABLED !== undefined && !['true', 'false'].includes(env.NOTIFICATION_WORKER_ENABLED)) throw new Error('NOTIFICATION_WORKER_ENABLED must be true or false');
+  if (env.SERVE_WEB !== undefined && !['true', 'false'].includes(env.SERVE_WEB)) throw new Error('SERVE_WEB must be true or false');
   return {
     databaseUrl: env.DATABASE_URL, host: env.HOST ?? '127.0.0.1', port: port(env.PORT, 4000),
-    webOrigin: web.origin, production, notificationWorkerEnabled: env.NOTIFICATION_WORKER_ENABLED === 'true' && env.NODE_ENV !== 'test',
+    webOrigin: web.origin, production, serveWeb: env.SERVE_WEB === 'true',
+    notificationWorkerEnabled: env.NOTIFICATION_WORKER_ENABLED === 'true' && env.NODE_ENV !== 'test',
     smtp: { host: env.SMTP_HOST ?? '127.0.0.1', port: port(env.SMTP_PORT, 1025), secure: env.SMTP_SECURE === 'true',
       user: env.SMTP_USER, password: env.SMTP_PASSWORD, from: env.MAIL_FROM ?? 'E-Repetitor <noreply@e-repetitor.local>' },
   };

@@ -31,7 +31,7 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
         VALUES($1,$2,$3,$4,'local-preview-v1','local-preview-v1') ON CONFLICT(email) DO NOTHING RETURNING id`,
       [userId, dto.name, dto.email, passwordHash]);
       if (!inserted.rows[0]) return undefined;
-      await this.accounts.createProfile(client, userId, dto.role);
+      await this.accounts.createProfile(client, userId, dto.role, dto);
       const token = await this.issueAccountToken(client, userId, 'verify');
       await audit(client, userId, 'account.registered');
       return { email: dto.email, token, purpose: 'verify' as const };

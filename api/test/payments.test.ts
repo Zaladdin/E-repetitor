@@ -110,7 +110,7 @@ describe('PostgreSQL manual payment journal API', { concurrency: false }, () => 
 
   test('known UUIDs and mixed roles cannot expose another teacher history or change it', async () => {
     const c = await context(); const other = await account('teacher'); const record = await create(c.teacher, c.enrollmentId);
-    await c.student.client.request('/me/roles', { role: 'teacher' });
+    await c.student.client.request('/me/roles', { role: 'teacher', phone: '+994501234567', birthDate: '1990-01-01', subject: 'Другой предмет' });
     for (const actor of [other, c.student]) {
       assert.equal((await actor.client.request(`/payment-records/${record.id}/history`)).status, 404);
       assert.equal((await actor.client.request(`/payment-records/${record.id}`, { version: 1, paid: true }, 'PATCH')).status, 404);

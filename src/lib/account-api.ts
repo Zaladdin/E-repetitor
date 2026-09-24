@@ -1,11 +1,19 @@
 import type { AccountLesson, AttendanceInput, CancelLessonInput, CreateLessonInput, LessonEvent, LessonMutationResult, RescheduleLessonInput } from './account-lessons';
 import type { AssignTestInput, AttemptMutation, CreateTestInput, ReviewAttemptInput, TestAnswer, TestAssignment, TestAttempt, TestDetail, TestDraftInput, TestSummary, TestVersion, TestVersionSummary } from './account-tests';
 import type { CancelPaymentRecordInput, CreatePaymentRecordInput, MarkPaymentInput, PaymentFilter, PaymentHistoryEvent, PaymentRecord } from './account-payments';
+import type { ChargePackageInput, ClosePackageInput, CreatePackageInput, LessonPackage, PackageHistoryEvent, PackageLesson, ReversePackageChargeInput } from './account-packages';
 import type { AccountOverviewData } from './account-overview';
+import type { AccountGroup, CreateGroupInput, GroupCandidate, GroupOccurrence, UpdateGroupInput } from './account-groups';
 import type { NotificationPage, NotificationPreference, NotificationPreferenceInput, NotificationType } from './account-notifications';
 import type { AdminAuditEvent, AdminOverview, AdminPage, AdminStatusInput, AdminUser, AdminUserDetail, AdminUserFilters } from './account-admin';
+import { translate } from './i18n';
 
 export type AccountRole = 'teacher' | 'student' | 'parent';
+export interface TeacherProfileInput { phone: string; birthDate: string; subject: string }
+export type AddAccountRoleInput = { role: 'teacher' } & TeacherProfileInput | { role: 'student' | 'parent' };
+export type AccountRegistrationInput = {
+  name: string; email: string; password: string; acceptTerms: boolean; acceptPrivacy: boolean;
+} & AddAccountRoleInput;
 
 export interface Account {
   id: string;
@@ -15,7 +23,7 @@ export interface Account {
   roles: AccountRole[];
   isAdmin?: boolean;
   profiles: {
-    teacher?: { id: string; timezone: string };
+    teacher?: { id: string; timezone: string; phone: string | null; birthDate: string | null };
     student?: { id: string; publicId: string };
     parent?: { id: string };
   };
@@ -79,6 +87,7 @@ export function createAccountApi(
   let refreshPromise: Promise<void> | null = null;
   let requestEpoch = 0;
   const overviewChanges = new EventTarget();
+  const paymentChanges = new EventTarget();
 
   async function send(path: string, body?: unknown, expectedAccountId?: string, method?: RequestOptions['method']): Promise<Response> {
     try {
@@ -144,9 +153,13 @@ export function createAccountApi(
     assertCurrent();
     // Refresh summaries after committed domain changes, never on answer autosave.
     if (options.expectedAccountId && options.body !== undefined
-      && /^\/(enrollments|parent-connections|lessons|test-assignments|attempts|payment-records)(\/|$)/.test(path)
+      && /^\/(enrollments|parent-connections|lessons|test-assignments|attempts|payment-records|packages|groups)(\/|$)/.test(path)
       && !path.endsWith('/answers')) {
       overviewChanges.dispatchEvent(new Event(options.expectedAccountId));
+    }
+    if (options.expectedAccountId && options.body !== undefined
+      && /^\/(payment-records|packages)(\/|$)/.test(path)) {
+      paymentChanges.dispatchEvent(new Event(options.expectedAccountId));
     }
     return result;
   }
@@ -172,6 +185,12 @@ export function createAccountApi(
   const publicPost = <T>(path: string, body: unknown) => request<T>(path, { body, refresh: false });
 
   return {
+    groups: (accountId: string, offset = 0) => request<AccountPage<AccountGroup>>(`/groups?${new URLSearchParams({ limit: '20', offset: String(offset) })}`, { expectedAccountId: accountId }),
+    groupCandidates: (accountId: string, subjectId: string, offset = 0) => request<AccountPage<GroupCandidate>>(`/groups/candidates?${new URLSearchParams({ subjectId, limit: '50', offset: String(offset) })}`, { expectedAccountId: accountId }),
+    createGroup: (accountId: string, data: CreateGroupInput) => request<AccountGroup>('/groups', { body: data, expectedAccountId: accountId }),
+    updateGroup: (accountId: string, id: string, data: UpdateGroupInput) => request<AccountGroup>(`/groups/${encodeURIComponent(id)}`, { method: 'PATCH', body: data, expectedAccountId: accountId }),
+    archiveGroup: (accountId: string, id: string, version: number) => request<AccountGroup>(`/groups/${encodeURIComponent(id)}/archive`, { body: { version }, expectedAccountId: accountId }),
+    groupSchedule: (accountId: string, role: AccountRole, from: string, to: string, offset = 0) => request<AccountPage<GroupOccurrence>>(`/groups/schedule?${new URLSearchParams({ role, from, to, limit: '50', offset: String(offset) })}`, { expectedAccountId: accountId }),
     adminOverview: (accountId: string) => request<AdminOverview>('/admin/overview', { expectedAccountId: accountId }),
     adminUsers: (accountId: string, filters: AdminUserFilters, offset = 0) => request<AdminPage<AdminUser>>(`/admin/users?${new URLSearchParams({ limit: '20', offset: String(offset), ...(filters.query ? { query: filters.query } : {}), ...(filters.role ? { role: filters.role } : {}), ...(filters.status ? { status: filters.status } : {}) })}`, { expectedAccountId: accountId }),
     adminUser: (accountId: string, id: string) => request<AdminUserDetail>(`/admin/users/${encodeURIComponent(id)}`, { expectedAccountId: accountId }),
@@ -185,6 +204,10 @@ export function createAccountApi(
       overviewChanges.addEventListener(accountId, listener);
       return () => overviewChanges.removeEventListener(accountId, listener);
     },
+    subscribePayments(accountId: string, listener: () => void) {
+      paymentChanges.addEventListener(accountId, listener);
+      return () => paymentChanges.removeEventListener(accountId, listener);
+    },
     overview: (accountId: string, role: AccountRole, studentId?: string) => request<AccountOverviewData>(`/overview?${new URLSearchParams({ role, ...(studentId ? { studentId } : {}) })}`, { expectedAccountId: accountId }),
     invalidatePendingRequests() { requestEpoch++; },
     async current(): Promise<Account | null> {
@@ -195,7 +218,7 @@ export function createAccountApi(
         throw error;
       }
     },
-    register: (data: { name: string; email: string; password: string; role: AccountRole; acceptTerms: boolean; acceptPrivacy: boolean }) => publicPost<ApiMessage>('/auth/register', data),
+    register: (data: AccountRegistrationInput) => publicPost<ApiMessage>('/auth/register', data),
     login: (email: string, password: string) => publicPost<{ user: Account }>('/auth/login', { email, password }),
     verifyEmail: (token: string) => publicPost<ApiMessage>('/auth/verify-email', { token }),
     resendVerification: (email: string) => publicPost<ApiMessage>('/auth/resend-verification', { email }),
@@ -203,7 +226,7 @@ export function createAccountApi(
     resetPassword: (token: string, password: string) => publicPost<ApiMessage>('/auth/reset-password', { token, password }),
     logout: (accountId: string) => request<ApiMessage>('/auth/logout', { body: {}, expectedAccountId: accountId }),
     logoutAll: (accountId: string) => request<ApiMessage>('/auth/logout-all', { body: {}, expectedAccountId: accountId }),
-    addRole: (accountId: string, role: AccountRole) => request<Account>('/me/roles', { body: { role }, expectedAccountId: accountId }),
+    addRole: (accountId: string, data: AddAccountRoleInput) => request<Account>('/me/roles', { body: data, expectedAccountId: accountId }),
     subjects: (accountId: string, offset = 0) => request<AccountSubjectPage>(`/subjects?limit=100&offset=${offset}`, { expectedAccountId: accountId }),
     createSubject: (accountId: string, name: string) => request<AccountSubject>('/subjects', { body: { name }, expectedAccountId: accountId }),
     enrollments: (accountId: string, role: 'teacher' | 'student', offset = 0) => request<AccountPage<AccountEnrollment>>(`/enrollments?role=${role}&limit=50&offset=${offset}`, { expectedAccountId: accountId }),
@@ -246,6 +269,13 @@ export function createAccountApi(
     markPayment: (accountId: string, id: string, data: MarkPaymentInput) => request<PaymentRecord>(`/payment-records/${encodeURIComponent(id)}`, { method: 'PATCH', body: data, expectedAccountId: accountId }),
     cancelPaymentRecord: (accountId: string, id: string, data: CancelPaymentRecordInput) => request<PaymentRecord>(`/payment-records/${encodeURIComponent(id)}/cancel`, { body: data, expectedAccountId: accountId }),
     paymentHistory: (accountId: string, id: string, offset = 0) => request<AccountPage<PaymentHistoryEvent>>(`/payment-records/${encodeURIComponent(id)}/history?limit=50&offset=${offset}`, { expectedAccountId: accountId }),
+    packageRecords: (accountId: string, role: AccountRole, offset = 0) => request<AccountPage<LessonPackage>>(`/packages?${new URLSearchParams({ role, limit: '50', offset: String(offset) })}`, { expectedAccountId: accountId }),
+    createPackage: (accountId: string, data: CreatePackageInput) => request<LessonPackage>('/packages', { body: data, expectedAccountId: accountId }),
+    packageLessons: (accountId: string, id: string, offset = 0) => request<AccountPage<PackageLesson>>(`/packages/${encodeURIComponent(id)}/lessons?limit=50&offset=${offset}`, { expectedAccountId: accountId }),
+    chargePackage: (accountId: string, id: string, data: ChargePackageInput) => request<LessonPackage>(`/packages/${encodeURIComponent(id)}/charges`, { body: data, expectedAccountId: accountId }),
+    reversePackageCharge: (accountId: string, id: string, data: ReversePackageChargeInput) => request<LessonPackage>(`/packages/${encodeURIComponent(id)}/reversals`, { body: data, expectedAccountId: accountId }),
+    closePackage: (accountId: string, id: string, data: ClosePackageInput) => request<LessonPackage>(`/packages/${encodeURIComponent(id)}/close`, { body: data, expectedAccountId: accountId }),
+    packageHistory: (accountId: string, id: string, role: AccountRole, offset = 0) => request<AccountPage<PackageHistoryEvent>>(`/packages/${encodeURIComponent(id)}/history?${new URLSearchParams({ role, limit: '50', offset: String(offset) })}`, { expectedAccountId: accountId }),
     previewInvitation: (token: string) => publicPost<InvitationPreview>('/invitations/preview', { token }),
     activateInvitation: (data: InvitationActivationInput) => publicPost<ApiMessage>('/invitations/activate', data),
   };
@@ -254,7 +284,7 @@ export function createAccountApi(
 export const accountApi = createAccountApi();
 
 export function accountErrorMessage(error: unknown): string {
-  return error instanceof AccountApiError ? error.message : 'Не удалось выполнить действие. Повторите попытку.';
+  return translate(error instanceof AccountApiError ? error.message : 'Не удалось выполнить действие. Повторите попытку.');
 }
 
 export function isStaleAccountRequest(error: unknown): boolean {

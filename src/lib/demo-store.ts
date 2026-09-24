@@ -6,6 +6,7 @@ import {
   type Actor, type Command, type DemoState,
 } from '@/domain';
 import { restoreDemoState } from './restore-demo';
+import { translate } from './i18n';
 
 const STORAGE_KEY = 'e-repetitor.demo.v1';
 type Snapshot = { data: DemoState; storageWarning: string | null };
@@ -48,7 +49,7 @@ export function useDemoStore() {
   return {
     state,
     run(actor: Actor, command: Command) {
-      if (!snapshot) throw new Error('Демонстрация ещё загружается.');
+      if (!snapshot) throw new Error(translate('Демонстрация ещё загружается.'));
       save(executeCommand(snapshot.data, actor, command));
     },
     reset() { save(createDemoState()); },

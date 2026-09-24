@@ -65,7 +65,8 @@ describe('PostgreSQL accounts API', { concurrency: false }, () => {
     }
   }
   function registration(email: string, role = 'teacher') {
-    return { name: 'Анна Смирнова', email, password, role, acceptTerms: true, acceptPrivacy: true };
+    return { name: 'Анна Смирнова', email, password, role, acceptTerms: true, acceptPrivacy: true,
+      ...(role === 'teacher' ? { phone: '+994 (50) 123-45-67', birthDate: '1992-02-29', subject: ' Первый предмет ' } : {}) };
   }
   async function active(role: 'teacher' | 'student' | 'parent' = 'teacher') {
     const client = new Client(); const email = `${randomUUID()}@example.com`;
@@ -138,7 +139,7 @@ describe('PostgreSQL accounts API', { concurrency: false }, () => {
     assert.equal((await student.client.request('/subjects', { name: 'Взлом' })).status, 403);
     const annaSubjects = await anna.client.request<{ items: { id: string; name: string }[]; total: number }>('/subjects');
     const muradSubjects = await murad.client.request<{ items: { id: string; name: string }[] }>('/subjects');
-    assert.equal(annaSubjects.body.total, 1); assert.notEqual(annaSubjects.body.items[0]!.id, muradSubjects.body.items[0]!.id);
+    assert.equal(annaSubjects.body.total, 2); assert.notEqual(annaSubjects.body.items[0]!.id, muradSubjects.body.items[0]!.id);
     assert.equal((await anna.client.request(`/subjects?teacherId=${murad.account.profiles.teacher!.id}`)).status, 400);
     assert.equal((await anna.client.request('/subjects?limit=0')).status, 400);
     assert.equal((await anna.client.request('/subjects?limit=1&offset=1')).body.items instanceof Array, true);
@@ -175,7 +176,7 @@ describe('PostgreSQL accounts API', { concurrency: false }, () => {
       assert.equal(result.status, 409); assert.equal(result.body.error.code, 'account_changed');
     }
     assert.equal((await murad.client.request('/me')).status, 200);
-    assert.equal((await murad.client.request<{ total: number }>('/subjects')).body.total, 0);
+    assert.equal((await murad.client.request<{ total: number }>('/subjects')).body.total, 1);
     assert.deepEqual((await murad.client.request<Account>('/me')).body.roles, ['teacher']);
     assert.equal((await murad.client.request('/subjects', { name: 'Correct owner' }, { 'X-Account-ID': murad.account.id })).status, 201);
   });
@@ -260,5 +261,74 @@ describe('PostgreSQL accounts API', { concurrency: false }, () => {
     for (const path of ['/auth/register', '/auth/login', '/auth/refresh', '/auth/verify-email', '/auth/reset-password', '/me', '/me/roles', '/subjects']) {
       assert.ok(spec.body.paths[`/api/v1${path}`], path);
     }
+  });
+
+  test('teacher registration persists private details and the initial subject; later subjects use the same profile', async () => {
+    const teacher = await active();
+    assert.equal(teacher.account.name, 'Анна Смирнова');
+    assert.equal(teacher.account.profiles.teacher!.phone, '+994501234567');
+    assert.equal(teacher.account.profiles.teacher!.birthDate, '1992-02-29');
+    assert.deepEqual((await teacher.client.request<Account>('/me')).body, teacher.account);
+    const subjects = await teacher.client.request<{ items: { name: string }[]; total: number }>('/subjects');
+    assert.equal(subjects.body.total, 1); assert.equal(subjects.body.items[0]!.name, 'Первый предмет');
+    assert.equal((await teacher.client.request('/subjects', { name: 'Физика' })).status, 201);
+    assert.equal((await teacher.client.request<{ total: number }>('/subjects')).body.total, 2);
+    assert.equal((await teacher.client.request('/subjects', { name: 'физика' })).status, 409);
+  });
+
+  test('teacher details are required at the HTTP boundary and invalid requests create no account', async () => {
+    const client = new Client();
+    const invalids = [{ phone: undefined }, { birthDate: undefined }, { subject: undefined }, { phone: '0501234567' },
+      { birthDate: '2025-02-29' }, { birthDate: '9999-01-01' }, { subject: '   ' }, { birthDate: null }];
+    for (const invalid of invalids) {
+      const email = `${randomUUID()}@example.test`;
+      const result = await client.request<ErrorBody>('/auth/register', { ...registration(email), ...invalid });
+      assert.equal(result.status, 400); assert.equal(result.body.error.code, 'validation_error');
+      assert.equal((await db.query('SELECT id FROM users WHERE email=$1', [email])).rowCount, 0);
+    }
+    assert.equal(mail.messages.length, 0);
+  });
+
+  test('adding the teacher role requires details once, creates one subject, and remains idempotent under concurrent requests', async () => {
+    const parent = await active('parent');
+    const missing = await parent.client.request<ErrorBody>('/me/roles', { role: 'teacher' });
+    assert.equal(missing.status, 400); assert.equal(missing.body.error.code, 'validation_error');
+    assert.deepEqual((await parent.client.request<Account>('/me')).body.roles, ['parent']);
+    const details = { role: 'teacher', phone: '+994 50 765 43 21', birthDate: '2001-03-02', subject: 'География' };
+    const added = await Promise.all([parent.client.request<Account>('/me/roles', details), parent.client.request<Account>('/me/roles', details)]);
+    for (const result of added) { assert.equal(result.status, 200); assert.deepEqual(result.body.roles, ['teacher', 'parent']); }
+    assert.deepEqual(added[0]!.body.profiles.teacher, added[1]!.body.profiles.teacher);
+    assert.equal(added[0]!.body.profiles.teacher!.phone, '+994507654321');
+    assert.equal(added[0]!.body.profiles.teacher!.birthDate, '2001-03-02');
+    assert.equal((await parent.client.request<{ total: number }>('/subjects')).body.total, 1);
+    assert.equal((await parent.client.request('/me/roles', { role: 'teacher' })).status, 200);
+    assert.equal((await parent.client.request<{ total: number }>('/subjects')).body.total, 1);
+  });
+
+  test('legacy teacher profiles with null details keep working and do not need a forced profile update', async () => {
+    const parent = await active('parent'); const profileId = randomUUID();
+    await db.query('INSERT INTO teacher_profiles(id,user_id) VALUES($1,$2)', [profileId, parent.account.id]);
+    const account = await parent.client.request<Account>('/me');
+    assert.deepEqual(account.body.profiles.teacher, { id: profileId, timezone: 'Asia/Baku', phone: null, birthDate: null });
+    assert.equal((await parent.client.request('/me/roles', { role: 'teacher' })).status, 200);
+    assert.equal((await parent.client.request('/subjects', { name: 'Литература' })).status, 201);
+    const login = await new Client().request<{ user: Account }>('/auth/login', { email: parent.email, password });
+    assert.equal(login.status, 200); assert.equal(login.body.user.profiles.teacher!.phone, null);
+  });
+
+  test('failed first-subject insertion rolls back registration and teacher-role addition atomically', async () => {
+    const parent = await active('parent'); const client = new Client(); const email = 'subject-rollback@example.test';
+    mail.messages.length = 0;
+    await db.query('ALTER TABLE subjects ADD CONSTRAINT test_reject_initial_subject CHECK(false) NOT VALID');
+    try {
+      assert.equal((await client.request('/auth/register', registration(email))).status, 500);
+      assert.equal((await db.query('SELECT id FROM users WHERE email=$1', [email])).rowCount, 0);
+      assert.equal((await db.query('SELECT id FROM teacher_profiles')).rowCount, 0);
+      assert.equal(mail.messages.length, 0);
+      const details = { role: 'teacher', phone: '+994501234567', birthDate: '1990-01-01', subject: 'Физика' };
+      assert.equal((await parent.client.request('/me/roles', details)).status, 500);
+      assert.deepEqual((await parent.client.request<Account>('/me')).body.roles, ['parent']);
+      assert.equal((await db.query('SELECT id FROM teacher_profiles')).rowCount, 0);
+    } finally { await db.query('ALTER TABLE subjects DROP CONSTRAINT test_reject_initial_subject'); }
   });
 });

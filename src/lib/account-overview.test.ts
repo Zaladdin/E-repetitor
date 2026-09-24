@@ -38,7 +38,7 @@ describe('overview selection and rendering', () => {
     expect(html).toContain('Показано 1 из 101');
     expect(html).toContain('&lt;script&gt;unsafe&lt;/script&gt;');
     expect(html).not.toContain('<script>');
-    expect(html).toContain('href="#account-lessons-section"');
+    expect(html).toContain('href="/account/lessons"');
   });
 
   it('shows teacher work counts but omits unpublished actions in parent rendering', () => {

@@ -70,6 +70,7 @@ describe('PostgreSQL connections API', { concurrency: false }, () => {
     const anna = await account('teacher', 'Анна Смирнова'); const murad = await account('teacher', 'Мурад Гасанов');
     const ali = await account('student', 'Али Мамедов'); const other = await account('student', 'Другой ученик');
     const leyla = await account('parent', 'Лейла Мамедова');
+    await db.query("UPDATE teacher_profiles SET phone='+994501234567',birth_date='1992-02-29' WHERE id=$1", [anna.profileId]);
     const math = await subject(anna); const physics = await subject(murad, 'Физика');
     const mathId = await enrollment(anna, ali, math); const physicsId = await enrollment(murad, ali, physics);
     const pending = await anna.client.request<EnrollmentPage>('/enrollments?role=teacher');
@@ -94,6 +95,11 @@ describe('PostgreSQL connections API', { concurrency: false }, () => {
     assert.equal(children.body.total, 1); assert.equal(children.body.items[0]!.publicId, ali.publicId);
     assert.deepEqual(children.body.items[0]!.enrollments.map(item => item.subjectName).sort(), ['Математика', 'Физика']);
     assert.ok(!JSON.stringify(children.body).includes('email')); assert.ok(!JSON.stringify(children.body).includes('notes'));
+    for (const response of [children.body, confirmed.body]) {
+      const serialized = JSON.stringify(response);
+      assert.ok(!serialized.includes('phone')); assert.ok(!serialized.includes('birthDate'));
+      assert.ok(!serialized.includes('+994501234567')); assert.ok(!serialized.includes('1992-02-29'));
+    }
     assert.equal((await anna.client.request('/parent-children')).status, 403);
   });
 

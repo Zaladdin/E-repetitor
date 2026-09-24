@@ -1,3 +1,5 @@
+
+import { translate } from '@/lib/i18n';
 import { z } from "zod";
 import type { DemoState } from "./model";
 
@@ -35,12 +37,12 @@ export const demoStateSchema: z.ZodType<DemoState> = z.object({
 }).strict().superRefine((state, context) => {
   const issue = (message: string) => context.addIssue({ code: "custom", message });
   const unique = (values: string[], label: string) => {
-    if (new Set(values).size !== values.length) issue(`Повторяющиеся идентификаторы: ${label}.`);
+    if (new Set(values).size !== values.length) issue(translate("Повторяющиеся идентификаторы: {label}.", { label: label }));
   };
   const tables = [state.users, state.teachers, state.students, state.parents, state.subjects, state.enrollments, state.parentConnections, state.audit];
   tables.forEach((rows) => unique(rows.map((row) => row.id), "id"));
   unique(state.students.map((student) => student.publicId), "Student ID");
-  unique(state.users.flatMap((user) => user.roles.map((role) => `${user.id}/${role}`)), "роли");
+  unique(state.users.flatMap((user) => user.roles.map((role) => `${user.id}/${role}`)), translate("роли"));
 
   const userById = new Map(state.users.map((user) => [user.id, user]));
   const studentById = new Map(state.students.map((student) => [student.id, student]));
@@ -50,27 +52,27 @@ export const demoStateSchema: z.ZodType<DemoState> = z.object({
   for (const [role, profiles] of [["teacher", state.teachers], ["student", state.students], ["parent", state.parents]] as const) {
     unique(profiles.flatMap((item) => item.userId ? [item.userId] : []), `${role} userId`);
     for (const item of profiles) {
-      if (item.userId !== null && !userById.get(item.userId)?.roles.includes(role)) issue("Профиль не соответствует роли пользователя.");
+      if (item.userId !== null && !userById.get(item.userId)?.roles.includes(role)) issue(translate("Профиль не соответствует роли пользователя."));
     }
   }
-  if (state.students.some((student) => student.status === "active" && student.userId === null)) issue("Активному ученику нужен аккаунт.");
+  if (state.students.some((student) => student.status === "active" && student.userId === null)) issue(translate("Активному ученику нужен аккаунт."));
   for (const subject of state.subjects) {
-    if (!teachers.has(subject.teacherId)) issue("У предмета отсутствует преподаватель.");
+    if (!teachers.has(subject.teacherId)) issue(translate("У предмета отсутствует преподаватель."));
   }
   for (const enrollment of state.enrollments) {
-    if (!studentById.has(enrollment.studentId) || !teachers.has(enrollment.teacherId) || subjectById.get(enrollment.subjectId)?.teacherId !== enrollment.teacherId) issue("Нарушена связь ученика, преподавателя и предмета.");
-    if (Date.parse(enrollment.expiresAt) <= Date.parse(enrollment.createdAt)) issue("Некорректный срок действия запроса.");
+    if (!studentById.has(enrollment.studentId) || !teachers.has(enrollment.teacherId) || subjectById.get(enrollment.subjectId)?.teacherId !== enrollment.teacherId) issue(translate("Нарушена связь ученика, преподавателя и предмета."));
+    if (Date.parse(enrollment.expiresAt) <= Date.parse(enrollment.createdAt)) issue(translate("Некорректный срок действия запроса."));
   }
   unique(state.enrollments.filter((item) => ["pending", "active", "paused"].includes(item.status)).map((item) => `${item.teacherId}/${item.studentId}/${item.subjectId}`), "Enrollment");
   for (const connection of state.parentConnections) {
     const student = studentById.get(connection.studentId);
-    if (!student || !parents.has(connection.parentId)) issue("Нарушена связь родителя и ученика.");
-    if (["active", "revoked"].includes(connection.status) && (!connection.approvedAt || connection.approvedBy !== student?.userId)) issue("Подтверждение связи должно принадлежать ученику.");
-    if (["pending", "rejected"].includes(connection.status) && (connection.approvedAt || connection.approvedBy)) issue("Неподтверждённая связь содержит подтверждение.");
-    if (connection.approvedAt && Date.parse(connection.approvedAt) < Date.parse(connection.createdAt)) issue("Некорректное время подтверждения.");
+    if (!student || !parents.has(connection.parentId)) issue(translate("Нарушена связь родителя и ученика."));
+    if (["active", "revoked"].includes(connection.status) && (!connection.approvedAt || connection.approvedBy !== student?.userId)) issue(translate("Подтверждение связи должно принадлежать ученику."));
+    if (["pending", "rejected"].includes(connection.status) && (connection.approvedAt || connection.approvedBy)) issue(translate("Неподтверждённая связь содержит подтверждение."));
+    if (connection.approvedAt && Date.parse(connection.approvedAt) < Date.parse(connection.createdAt)) issue(translate("Некорректное время подтверждения."));
   }
   unique(state.parentConnections.filter((item) => ["pending", "active"].includes(item.status)).map((item) => `${item.parentId}/${item.studentId}`), "ParentConnection");
   for (const event of state.audit) {
-    if (event.actorUserId !== "system" && !userById.has(event.actorUserId)) issue("У события аудита отсутствует автор.");
+    if (event.actorUserId !== "system" && !userById.has(event.actorUserId)) issue(translate("У события аудита отсутствует автор."));
   }
 });

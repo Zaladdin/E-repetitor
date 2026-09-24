@@ -1,5 +1,8 @@
 'use client';
 
+import { useI18n } from './locale-provider';
+
+
 import { useContext, useEffect, useId, useRef, type ReactNode } from 'react';
 import { Info, X } from 'lucide-react';
 import { AccountSessionSuspendedContext } from './account-session-context';
@@ -11,7 +14,8 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 export function Status({ value }: { value: string }) {
-  return <span className={`status status-${value}`}>{STATUS_LABELS[value] ?? value}</span>;
+  const { t } = useI18n();
+  return <span className={`status status-${value}`}>{t(STATUS_LABELS[value] ?? value)}</span>;
 }
 
 export function InfoPanel({ title, children }: { title: string; children: ReactNode }) {
@@ -26,6 +30,7 @@ export function EmptyState({ title, children }: { title: string; children: React
 export function Modal({ title, onClose, children }: {
   title: string; onClose: () => void; children: ReactNode;
 }) {
+  const { t } = useI18n();
   const ref = useRef<HTMLDialogElement>(null);
   const suspended = useContext(AccountSessionSuspendedContext);
   const lastFocused = useRef<HTMLElement | null>(null);
@@ -54,7 +59,7 @@ export function Modal({ title, onClose, children }: {
     onFocusCapture={(event) => { if (event.target instanceof HTMLElement) lastFocused.current = event.target; }}
     onCancel={(event) => { event.preventDefault(); onClose(); }}>
     <div className="dialog-heading"><h2 id={titleId}>{title}</h2>
-      <button type="button" className="icon-button" aria-label="Закрыть окно" onClick={onClose}><X size={22} /></button></div>
+      <button type="button" className="icon-button" aria-label={t("Закрыть окно")} onClick={onClose}><X size={22} /></button></div>
     {children}
   </dialog>;
 }
@@ -62,7 +67,8 @@ export function Modal({ title, onClose, children }: {
 export function ConfirmDialog({ title, description, action, onConfirm, onClose }: {
   title: string; description: string; action: string; onConfirm: () => void; onClose: () => void;
 }) {
+  const { t } = useI18n();
   return <Modal title={title} onClose={onClose}><p className="muted">{description}</p>
-    <div className="form-actions"><button className="button secondary" onClick={onClose}>Отмена</button>
+    <div className="form-actions"><button className="button secondary" onClick={onClose}>{t("Отмена")}</button>
       <button className="button" onClick={onConfirm}>{action}</button></div></Modal>;
 }

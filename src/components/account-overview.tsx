@@ -1,5 +1,11 @@
 'use client';
 
+import { useI18n } from './locale-provider';
+import { localeTag } from '@/lib/i18n';
+
+
+import Link from 'next/link';
+
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { accountApi, accountErrorMessage, accountSessionChanged, isStaleAccountRequest, type AccountRole } from '@/lib/account-api';
@@ -19,13 +25,15 @@ function useOverviewRefresh(accountId: string, reload: () => void) {
 }
 
 export function AccountOverview(props: OverviewProps) {
+  const { t } = useI18n();
   return <section className="account-overview" aria-labelledby="account-overview-title">
-    <div className="account-section-heading"><div><p className="account-eyebrow">Всё важное в одном месте</p><h2 id="account-overview-title">Обзор кабинета</h2><p className="muted">{props.role === 'teacher' ? 'Занятия, результаты учеников и ручной учёт оплаты.' : props.role === 'parent' ? 'Общая картина обучения у всех преподавателей.' : 'Ваши занятия, тесты и результаты по всем предметам.'}</p></div></div>
+    <div className="account-section-heading"><div><h2 id="account-overview-title">{t("Обзор кабинета")}</h2><p className="muted">{props.role === 'teacher' ? t("Занятия, результаты учеников и ручной учёт оплаты.") : props.role === 'parent' ? t("Общая картина обучения у всех преподавателей.") : t("Ваши занятия, тесты и результаты по всем предметам.")}</p></div></div>
     {props.role === 'parent' ? <ParentOverview {...props} /> : <OverviewContent {...props} />}
   </section>;
 }
 
 function ParentOverview(props: OverviewProps) {
+  const { t } = useI18n();
   const id = useId();
   const fetchChildren = useCallback((offset: number) => accountApi.parentChildren(props.accountId, offset), [props.accountId]);
   const children = useAccountPage(fetchChildren, props.onSessionChanged);
@@ -36,21 +44,22 @@ function ParentOverview(props: OverviewProps) {
 
   return <>
     <div className="overview-child-toolbar">
-      <div><label htmlFor={`${id}-child`}>Обзор по ребёнку</label><select id={`${id}-child`} value={studentId} disabled={children.loading} onChange={event => setSelected(event.target.value)}>
-        <option value="">Все дети</option>
+      <div><label htmlFor={`${id}-child`}>{t("Обзор по ребёнку")}</label><select id={`${id}-child`} value={studentId} disabled={children.loading} onChange={event => setSelected(event.target.value)}>
+        <option value="">{t("Все дети")}</option>
         {children.items.map(child => <option key={child.id} value={child.id}>{child.name} · {child.publicId}</option>)}
-        {missingSelection && <option value={studentId} disabled>Ранее выбранный ребёнок</option>}
+        {missingSelection && <option value={studentId} disabled>{t("Ранее выбранный ребёнок")}</option>}
       </select></div>
-      <button className="text-button" disabled={children.loading || children.loadingMore} onClick={children.reload}>Обновить список детей</button>
-      {children.nextOffset < children.total && <button className="text-button" disabled={children.loading || children.loadingMore} onClick={() => void children.loadMore()}>{children.loadingMore ? 'Загружаем…' : `Ещё дети · ${children.items.length} из ${children.total}`}</button>}
+      <button className="text-button" disabled={children.loading || children.loadingMore} onClick={children.reload}>{t("Обновить список детей")}</button>
+      {children.nextOffset < children.total && <button className="text-button" disabled={children.loading || children.loadingMore} onClick={() => void children.loadMore()}>{children.loadingMore ? t("Загружаем…") : t("Ещё дети · {value0} из {value1}", { value0: String(children.items.length), value1: String(children.total) })}</button>}
     </div>
-    <p className="overview-preview-note">Выбор ребёнка применяется к обзору. Разделы ниже содержат данные всех ваших детей.</p>
-    {children.loading ? <p role="status" className="overview-empty">Загружаем список детей…</p> : children.error ? <p role="alert" className="form-error">{children.error}</p> : children.total === 0 ? <div className="overview-empty"><p>Подтверждённых связей с детьми пока нет.</p><a className="overview-section-link" href="#account-connections-section">Подключить ребёнка по Student ID</a></div>
+    <p className="overview-preview-note">{t("Выбор ребёнка применяется к обзору. Остальные страницы кабинета содержат данные всех ваших детей.")}</p>
+    {children.loading ? <p role="status" className="overview-empty">{t("Загружаем список детей…")}</p> : children.error ? <p role="alert" className="form-error">{t(children.error)}</p> : children.total === 0 ? <div className="overview-empty"><p>{t("Подтверждённых связей с детьми пока нет.")}</p><Link className="overview-section-link" href="/account/connections/">{t("Подключить ребёнка по Student ID")}</Link></div>
       : <OverviewContent key={studentId || 'all'} {...props} studentId={studentId || undefined} />}
   </>;
 }
 
 function OverviewContent({ accountId, role, studentId, onSessionChanged }: OverviewProps & { studentId?: string }) {
+  const { t } = useI18n();
   const [data, setData] = useState<AccountOverviewData | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -79,7 +88,7 @@ function OverviewContent({ accountId, role, studentId, onSessionChanged }: Overv
   }, [accountId, role, studentId, revision, invalidate]);
 
   return <div className="overview-content" aria-busy={loading}>
-    <div className="overview-refresh-bar"><p className="muted">{data ? <>Данные на <time dateTime={data.asOf}>{new Date(data.asOf).toLocaleString('ru-RU', { dateStyle: 'medium', timeStyle: 'short' })}</time> · {timezone}</> : 'Сводка по данным преподавателей'}</p><button className="button secondary small" disabled={loading} onClick={reload}><RefreshCw size={16} aria-hidden="true" />Обновить обзор</button></div>
-    {loading ? <p role="status" className="overview-empty">Загружаем обзор…</p> : error ? <p role="alert" className="form-error">{error}</p> : data && <AccountOverviewSummary data={data} />}
+    <div className="overview-refresh-bar"><p className="muted">{data ? <>{t("Данные на")}{' '}<time dateTime={data.asOf}>{new Date(data.asOf).toLocaleString(localeTag(), { dateStyle: 'medium', timeStyle: 'short' })}</time> · {timezone}</> : t("Сводка по данным преподавателей")}</p><button className="button secondary small" disabled={loading} onClick={reload}><RefreshCw size={16} aria-hidden="true" />{t("Обновить обзор")}</button></div>
+    {loading ? <p role="status" className="overview-empty">{t("Загружаем обзор…")}</p> : error ? <p role="alert" className="form-error">{t(error)}</p> : data && <AccountOverviewSummary data={data} />}
   </div>;
 }

@@ -1,10 +1,14 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { Equals, IsEmail, IsIn, IsString, Length, Matches, MaxLength } from 'class-validator';
+import { Equals, IsEmail, IsIn, IsString, Length, Matches, MaxLength, ValidateBy, ValidateIf } from 'class-validator';
 import { Role } from './common';
+import { isBirthDate, normalizePhone, phonePattern } from './teacher-profile';
 
 const tidy = ({ value }: { value: unknown }) => typeof value === 'string' ? value.normalize('NFC').trim().replace(/\s+/g, ' ') : value;
 const email = ({ value }: { value: unknown }) => typeof value === 'string' ? value.trim().toLowerCase() : value;
+const BirthDate = () => ValidateBy({ name: 'birthDate', validator: { validate: value => isBirthDate(value) } },
+  { message: 'Укажите существующую дату рождения, не позднее сегодняшней.' });
+const phoneMessage = 'Введите номер телефона с кодом страны, например +994 50 123 45 67.';
 
 export class EmailDto {
   @ApiProperty({ example: 'teacher@example.com', maxLength: 254 })
@@ -23,6 +27,19 @@ export class RegisterDto extends LoginDto {
   name!: string;
   @ApiProperty({ enum: ['teacher', 'student', 'parent'] })
   @IsIn(['teacher', 'student', 'parent'], { message: 'Выберите роль.' }) role!: Role;
+  @ApiProperty({ required: false, description: 'Required for teachers. International phone number.', example: '+994501234567' })
+  @ValidateIf((dto: RegisterDto) => dto.role === 'teacher' || dto.phone !== undefined)
+  @Transform(({ value }: { value: unknown }) => normalizePhone(value))
+  @IsString({ message: phoneMessage }) @Matches(phonePattern, { message: phoneMessage })
+  phone?: string;
+  @ApiProperty({ required: false, description: 'Required for teachers. Calendar date, not in the future.', format: 'date', example: '1990-04-12' })
+  @ValidateIf((dto: RegisterDto) => dto.role === 'teacher' || dto.birthDate !== undefined)
+  @BirthDate() birthDate?: string;
+  @ApiProperty({ required: false, description: 'Required for teachers. First subject, created with the account.', minLength: 1, maxLength: 100 })
+  @ValidateIf((dto: RegisterDto) => dto.role === 'teacher' || dto.subject !== undefined)
+  @Transform(tidy) @IsString() @Length(1, 100, { message: 'Название предмета должно содержать от 1 до 100 символов.' })
+  @Matches(/^[^\u0000-\u001F\u007F]+$/u, { message: 'Название содержит недопустимые символы.' })
+  subject?: string;
   @ApiProperty({ enum: [true] }) @Equals(true, { message: 'Нужно принять условия использования.' }) acceptTerms!: true;
   @ApiProperty({ enum: [true] }) @Equals(true, { message: 'Нужно принять политику конфиденциальности.' }) acceptPrivacy!: true;
 }
@@ -37,6 +54,19 @@ export class ResetDto extends TokenDto {
 export class RoleDto {
   @ApiProperty({ enum: ['teacher', 'student', 'parent'] })
   @IsIn(['teacher', 'student', 'parent'], { message: 'Выберите роль.' }) role!: Role;
+  @ApiProperty({ required: false, description: 'Required when adding the teacher role for the first time.', example: '+994501234567' })
+  @ValidateIf((_dto: RoleDto, value: unknown) => value !== undefined)
+  @Transform(({ value }: { value: unknown }) => normalizePhone(value))
+  @IsString({ message: phoneMessage }) @Matches(phonePattern, { message: phoneMessage })
+  phone?: string;
+  @ApiProperty({ required: false, description: 'Required when adding the teacher role for the first time.', format: 'date' })
+  @ValidateIf((_dto: RoleDto, value: unknown) => value !== undefined)
+  @BirthDate() birthDate?: string;
+  @ApiProperty({ required: false, description: 'Required when adding the teacher role for the first time.', minLength: 1, maxLength: 100 })
+  @ValidateIf((_dto: RoleDto, value: unknown) => value !== undefined)
+  @Transform(tidy) @IsString() @Length(1, 100, { message: 'Название предмета должно содержать от 1 до 100 символов.' })
+  @Matches(/^[^\u0000-\u001F\u007F]+$/u, { message: 'Название содержит недопустимые символы.' })
+  subject?: string;
 }
 export class SubjectDto {
   @ApiProperty({ minLength: 1, maxLength: 100 })

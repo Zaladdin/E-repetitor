@@ -1,6 +1,9 @@
 'use client';
 
-import { useCallback, useId, useState } from 'react';
+import { useI18n } from './locale-provider';
+import { localeTag } from '@/lib/i18n';
+
+import { useCallback, useEffect, useId, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { accountApi, type AccountRole } from '@/lib/account-api';
 import { formatPaymentAmount, type PaymentFilter, type PaymentRecord } from '@/lib/account-payments';
@@ -18,9 +21,11 @@ export function AccountPayments(props: PaymentProps) {
 function PaymentJournal({ accountId, role, onSessionChanged, filter, onFilter }: PaymentProps & {
   filter: PaymentFilter | ''; onFilter: (value: PaymentFilter | '') => void;
 }) {
+  const { t } = useI18n();
   const id = useId();
   const load = useCallback((offset: number) => accountApi.paymentRecords(accountId, role, offset, filter || undefined), [accountId, role, filter]);
   const page = useAccountPage(load, onSessionChanged);
+  useEffect(() => accountApi.subscribePayments(accountId, page.reload), [accountId, page.reload]);
   const actions = useConnectionActions(onSessionChanged, page.reload);
   const [creating, setCreating] = useState(false);
   const [history, setHistory] = useState<PaymentRecord | null>(null);
@@ -30,31 +35,31 @@ function PaymentJournal({ accountId, role, onSessionChanged, filter, onFilter }:
   function changePaid(record: PaymentRecord, paid: boolean) {
     if (blocked || record.cancelled) return;
     if (!paid) setCorrection({ record, action: 'unpay' });
-    else void actions.run(() => accountApi.markPayment(accountId, record.id, { version: record.version, paid: true }), 'Оплата отмечена.');
+    else void actions.run(() => accountApi.markPayment(accountId, record.id, { version: record.version, paid: true }), t("Оплата отмечена."));
   }
 
   return <section className="account-payments" aria-labelledby={`${id}-title`}>
-    <ConnectionHeading id={`${id}-title`} title="Учёт оплаты" description={role === 'teacher' ? 'Отмечайте получение оплаты от учеников.' : role === 'parent' ? 'Статусы оплаты детей по всем доступным предметам.' : 'Отметки ваших преподавателей об оплате.'} onRefresh={page.reload} disabled={blocked} />
-    <p className="account-payment-note">Оплата производится вне платформы. Статусы здесь вручную отмечает преподаватель.</p>
+    <ConnectionHeading id={`${id}-title`} title={t("Учёт оплаты")} description={role === 'teacher' ? t("Отмечайте получение оплаты от учеников.") : role === 'parent' ? t("Статусы оплаты детей по всем доступным предметам.") : t("Отметки ваших преподавателей об оплате.")} onRefresh={page.reload} disabled={blocked} />
+    <p className="account-payment-note">{t("Оплата производится вне платформы. Статусы здесь вручную отмечает преподаватель.")}</p>
     <div className="account-payment-toolbar">
-      <div><label htmlFor={`${id}-filter`}>Показать</label><select id={`${id}-filter`} value={filter} disabled={actions.busy} onChange={event => onFilter(event.target.value as PaymentFilter | '')}>
-        <option value="">Все записи</option><option value="unpaid">Не оплачено</option><option value="paid">Оплачено</option><option value="cancelled">Отменённые записи</option>
+      <div><label htmlFor={`${id}-filter`}>{t("Показать")}</label><select id={`${id}-filter`} value={filter} disabled={actions.busy} onChange={event => onFilter(event.target.value as PaymentFilter | '')}>
+        <option value="">{t("Все записи")}</option><option value="unpaid">{t("Не оплачено")}</option><option value="paid">{t("Оплачено")}</option><option value="cancelled">{t("Отменённые записи")}</option>
       </select></div>
-      {role === 'teacher' && <button className="button" disabled={actions.busy} onClick={() => setCreating(true)}><Plus size={18} aria-hidden="true" />Добавить запись</button>}
+      {role === 'teacher' && <button className="button" disabled={actions.busy} onClick={() => setCreating(true)}><Plus size={18} aria-hidden="true" />{t("Добавить запись")}</button>}
     </div>
     <ActionFeedback actions={actions} />
-    <PageContent page={page} disabled={actions.busy} emptyTitle={filter ? 'Нет записей с таким статусом' : 'Записей об оплате пока нет'} emptyText={role === 'teacher' ? 'Добавьте запись для ученика и укажите, за что оплата: занятие, пакет или период.' : 'Записи появятся, когда преподаватель добавит их в журнал оплаты.'}>
+    <PageContent page={page} disabled={actions.busy} emptyTitle={filter ? t("Нет записей с таким статусом") : t("Записей об оплате пока нет")} emptyText={role === 'teacher' ? t("Добавьте запись для ученика и укажите, за что оплата: занятие, пакет или период.") : t("Записи появятся, когда преподаватель добавит их в журнал оплаты.")}>
       <ul className="account-payment-list">{page.items.map(record => <li key={record.id}>
         <div className="account-payment-main"><h3>{record.title}</h3><p>{record.subjectName} · {role === 'teacher' ? record.studentName : role === 'parent' ? `${record.studentName} · ${record.teacherName}` : record.teacherName}</p>
           {role === 'teacher' && <small>{record.studentPublicId}</small>}
-          <p className="account-payment-date">{record.paidMarkedAt ? `Отмечено как оплаченное ${dateTime(record.paidMarkedAt)}` : `Запись от ${dateTime(record.createdAt)}`}</p>
+          <p className="account-payment-date">{record.paidMarkedAt ? t("Отмечено как оплаченное {value1}", { value1: dateTime(record.paidMarkedAt) }) : t("Запись от {value1}", { value1: dateTime(record.createdAt) })}</p>
         </div>
         <div className="account-payment-side"><strong className="account-payment-amount">{formatPaymentAmount(record)}</strong>
-          <span className={`status status-${record.cancelled ? 'cancelled' : record.paid ? 'active' : 'pending'}`}>{record.cancelled ? 'Запись отменена' : record.paid ? 'Оплачено' : 'Не оплачено'}</span>
+          <span className={`status status-${record.cancelled ? 'cancelled' : record.paid ? 'active' : 'pending'}`}>{record.cancelled ? t("Запись отменена") : record.paid ? t("Оплачено") : t("Не оплачено")}</span>
           {role === 'teacher' && <>
-            {!record.cancelled && <label className="account-payment-check"><input type="checkbox" checked={record.paid} disabled={blocked} aria-label={`Оплачено: ${record.title}, ${record.studentName}, ${record.subjectName}`} onChange={event => changePaid(record, event.target.checked)} /><span>Оплачено</span></label>}
-            <div className="account-payment-actions"><button className="text-button" disabled={blocked} onClick={() => setHistory(record)}>История</button>
-              {!record.cancelled && !record.paid && <button className="text-button danger-text" disabled={blocked} onClick={() => setCorrection({ record, action: 'cancel' })}>Отменить запись</button>}
+            {!record.cancelled && <label className="account-payment-check"><input type="checkbox" checked={record.paid} disabled={blocked} aria-label={t("Оплачено: {value1}, {value2}, {value3}", { value1: record.title, value2: record.studentName, value3: record.subjectName })} onChange={event => changePaid(record, event.target.checked)} /><span>{t("Оплачено")}</span></label>}
+            <div className="account-payment-actions"><button className="text-button" disabled={blocked} onClick={() => setHistory(record)}>{t("История")}</button>
+              {!record.cancelled && !record.paid && <button className="text-button danger-text" disabled={blocked} onClick={() => setCorrection({ record, action: 'cancel' })}>{t("Отменить запись")}</button>}
             </div>
           </>}
         </div>
@@ -69,4 +74,4 @@ function PaymentJournal({ accountId, role, onSessionChanged, filter, onFilter }:
   </section>;
 }
 
-function dateTime(value: string) { return new Date(value).toLocaleString('ru-RU', { dateStyle: 'medium', timeStyle: 'short' }); }
+function dateTime(value: string) { return new Date(value).toLocaleString(localeTag(), { dateStyle: 'medium', timeStyle: 'short' }); }

@@ -70,7 +70,8 @@ describe('PostgreSQL pilot journey across independent tutors', { concurrency: fa
   async function register(role: Role, name: string) {
     const client = new Client(); const email = `${randomUUID()}@example.test`;
     const password = 'Pilot-fixture-password-2026';
-    await client.request(202, '/auth/register', { name, email, password, role, acceptTerms: true, acceptPrivacy: true });
+    await client.request(202, '/auth/register', { name, email, password, role, acceptTerms: true, acceptPrivacy: true,
+      ...(role === 'teacher' ? { phone: '+994501234567', birthDate: '1990-01-01', subject: 'Начальный предмет' } : {}) });
     await client.request(401, '/auth/login', { email, password });
     const verification = messages.find(message => message.email === email && message.purpose === 'verify');
     assert.ok(verification, 'Registration must deliver a verification email');
