@@ -7,7 +7,8 @@ import { readConfig } from '../src/config';
 import { Database } from '../src/database';
 import { hashToken, newToken, Role } from '../src/common';
 import { migrate } from '../src/migrate';
-import { AnswerPolicy, AssignmentPage, AssignmentView, AttemptMutationView, AttemptView, Question, TestDetail, TestPage, TestVersion, TestVersionPage } from '../src/tests.dto';
+import { resetTestDatabase } from './reset-database';
+import { AnswerPolicy, AssignmentPage, AssignmentView, AttemptMutationView, AttemptView, GroupAssignmentView, Question, TestDetail, TestFamilyPage, TestPage, TestVersion, TestVersionPage } from '../src/tests.dto';
 
 const origin = 'http://127.0.0.1:3000';
 describe('PostgreSQL test constructor and attempts API', { concurrency: false }, () => {
@@ -19,7 +20,7 @@ describe('PostgreSQL test constructor and attempts API', { concurrency: false },
     app = await createApp(readConfig({ ...process.env, DATABASE_URL: databaseUrl, WEB_ORIGIN: origin, NODE_ENV: 'test' }), { send: async () => undefined });
     await app.listen(0, '127.0.0.1'); base = `${await app.getUrl()}/api/v1`; db = app.get(Database);
   });
-  beforeEach(async () => { await db.query('TRUNCATE users, rate_limits CASCADE'); });
+  beforeEach(() => resetTestDatabase(db));
   after(async () => { if (app) await app.close(); });
   class Client {
     constructor(readonly userId: string, readonly token: string) {}
@@ -205,6 +206,7 @@ describe('PostgreSQL test constructor and attempts API', { concurrency: false },
     const pubs = await Promise.all([1, 2].map(() => c.teacher.client.request<AttemptMutationView>(`/attempts/${attempt.id}/publish-result`, { version: 3 })));
     assert.ok(pubs.every(r => r.status === 200)); assert.equal(pubs[0]!.body.version, 4);
     student = await c.student.client.request<AttemptView>(`/attempts/${attempt.id}?role=student`); assert.equal(student.body.score, 0); assert.equal(student.body.passed, false); assert.equal(student.body.percentage, 0);
+    assert.equal(student.body.correctAnswers, 0); assert.equal(student.body.totalQuestions, 2);
     assert.ok(student.body.questions!.every(q => !Object.hasOwn(q, 'correctOptionIds')));
     assert.equal((await c.teacher.client.request(`/attempts/${attempt.id}/review`, { version: 4, grades: [] })).status, 409);
   });
@@ -371,5 +373,162 @@ describe('PostgreSQL test constructor and attempts API', { concurrency: false },
     assert.ok(doc.components.schemas.AttemptView?.properties?.serverNow);
     assert.ok(doc.components.schemas.PublicQuestionView?.properties?.correctOptionIds);
     assert.ok(!doc.components.schemas.PublicQuestionView?.required?.includes('correctOptionIds'));
+  });
+
+  test('correct-answer counts use immutable question grades, withhold partial counts and release final results by explicit policy', async () => {
+    const c = await context(); const a = await assigned(c, await published(c, questions(true)), { resultPolicy: 'after_submission', answerPolicy: 'never' });
+    const done = await finish(c, a); const text = a.snapshot.questions[2]!;
+    const waiting = await c.student.client.request<AttemptView>(`/attempts/${done.id}?role=student`);
+    assert.equal(waiting.body.resultVisibility, 'pending_review'); assert.equal(waiting.body.totalQuestions, 3);
+    for (const field of ['score', 'passed', 'correctAnswers', 'grades', 'comment']) assert.equal(Object.hasOwn(waiting.body, field), false);
+    const teacherWaiting = await c.teacher.client.request<AttemptView>(`/attempts/${done.id}?role=teacher`);
+    assert.equal(teacherWaiting.body.score, 5); assert.equal(teacherWaiting.body.correctAnswers, undefined); assert.equal(teacherWaiting.body.passed, undefined);
+    const reviewed = await c.teacher.client.request<AttemptMutationView>(`/attempts/${done.id}/review`, { version: done.version, grades: [{ questionId: text.id, points: 2.5, comment: 'Частичный ответ' }], comment: 'Проверено' });
+    assert.equal(reviewed.status, 200);
+    const final = await c.student.client.request<AttemptView>(`/attempts/${done.id}?role=student`);
+    assert.equal(final.body.resultVisibility, 'visible'); assert.equal(final.body.score, 7.5); assert.equal(final.body.correctAnswers, 2); assert.equal(final.body.totalQuestions, 3);
+    assert.equal(final.body.passed, true); assert.equal(final.body.comment, 'Проверено'); assert.equal(final.body.grades?.length, 3);
+    assert.ok(final.body.questions?.every(q => q.correctOptionIds === undefined));
+    const list = await c.student.client.request<AssignmentPage>('/test-assignments?role=student');
+    assert.equal(list.body.items[0]?.attempts[0]?.correctAnswers, 2); assert.equal(list.body.items[0]?.resultPolicy, 'after_submission');
+    await c.teacher.client.request(`/attempts/${done.id}/review`, { version: reviewed.body.version, grades: [{ questionId: text.id, points: 5 }] });
+    assert.equal((await c.student.client.request<AttemptView>(`/attempts/${done.id}?role=student`)).body.correctAnswers, 3);
+  });
+
+  test('answer and result policies are independent, parents still require publication and omitted thresholds default to 60 percent', async () => {
+    const c = await context(); const parent = await account('parent'); await parentLink(parent, c.student);
+    const d = await draft(c, questions(), { passPoints: undefined });
+    const v = (await c.teacher.client.request<TestVersion>(`/tests/${d.id}/publish`, { revision: d.revision })).body;
+    for (const answerPolicy of ['never', 'after_submission', 'after_deadline', 'after_teacher_publish'] as const) {
+      for (const resultPolicy of ['after_submission', 'after_teacher_publish'] as const) {
+        const a = await assigned(c, v, { resultPolicy, answerPolicy, dueAt: await future() }); const done = await finish(c, a);
+        const student = await c.student.client.request<AttemptView>(`/attempts/${done.id}?role=student`);
+        assert.equal(student.body.resultVisibility, resultPolicy === 'after_submission' ? 'visible' : 'pending_publication');
+        assert.equal(student.body.correctAnswers, resultPolicy === 'after_submission' ? 2 : undefined);
+        assert.equal(student.body.passed, resultPolicy === 'after_submission' ? true : undefined);
+        assert.equal(student.body.passPoints, 3);
+        assert.equal(!!student.body.questions?.[0]?.correctOptionIds, answerPolicy === 'after_submission');
+        if (resultPolicy === 'after_teacher_publish') {
+          const summary = (await c.student.client.request<AssignmentPage>('/test-assignments?role=student')).body.items.find(item => item.id === a.id)!.attempts[0]!;
+          assert.equal(summary.resultVisibility, 'pending_publication'); assert.equal(summary.totalQuestions, 2);
+          for (const field of ['score', 'correctAnswers', 'passed', 'comment']) assert.equal(Object.hasOwn(summary, field), false);
+        }
+        assert.equal((await parent.client.request(`/attempts/${done.id}?role=parent`)).status, 404);
+        if (answerPolicy === 'after_deadline') {
+          await db.query("UPDATE test_assignments SET due_at=clock_timestamp()-interval '1 hour' WHERE id=$1", [a.id]);
+          const overdue = await c.student.client.request<AttemptView>(`/attempts/${done.id}?role=student`);
+          assert.ok(overdue.body.questions?.[0]?.correctOptionIds); assert.equal(overdue.body.resultVisibility, student.body.resultVisibility);
+        }
+        await c.teacher.client.request(`/attempts/${done.id}/publish-result`, { version: done.version });
+        const publicResult = await parent.client.request<AttemptView>(`/attempts/${done.id}?role=parent`);
+        assert.equal(publicResult.body.correctAnswers, 2); assert.equal(publicResult.body.totalQuestions, 2); assert.equal(publicResult.body.resultVisibility, 'visible');
+        for (const field of ['questions', 'answers', 'grades']) assert.equal(Object.hasOwn(publicResult.body, field), false);
+      }
+    }
+    const legacy = await assigned(c, v); assert.equal(legacy.resultPolicy, 'after_teacher_publish');
+    await db.query("UPDATE test_assignments SET request_payload=request_payload-'resultPolicy' WHERE id=$1", [legacy.id]);
+    assert.equal((await c.teacher.client.request<AssignmentView>('/test-assignments', legacy.input)).body.id, legacy.id);
+    assert.equal((await c.teacher.client.request('/test-assignments', { ...legacy.input, requestId: randomUUID(), resultPolicy: 'after_deadline' })).status, 400);
+    for (const questionIndex of [1, 0, -1]) {
+      const boundary = await assigned(c, v, { resultPolicy: 'after_submission' }); const attempt = await started(c, boundary);
+      const q = v.questions[questionIndex];
+      const saved = await c.student.client.request<AttemptMutationView>(`/attempts/${attempt.id}/answers`, { version: 1, answers: q ? [{ questionId: q.id, selectedOptionIds: q.correctOptionIds }] : [] }, 'PATCH');
+      await c.student.client.request(`/attempts/${attempt.id}/submit`, { version: saved.body.version });
+      const result = (await c.student.client.request<AttemptView>(`/attempts/${attempt.id}?role=student`)).body;
+      assert.equal(result.passPoints, 3); assert.equal(result.score, q?.points ?? 0); assert.equal(result.passed, questionIndex === 1); assert.equal(result.correctAnswers, q ? 1 : 0);
+    }
+  });
+
+  test('variants are independent drafts with their own version history, family pagination and immutable assigned snapshots', async () => {
+    const c = await context(); const other = await context(); const a = await draft(c); const va = (await c.teacher.client.request<TestVersion>(`/tests/${a.id}/publish`, { revision: 1 })).body;
+    const assignedA = await assigned(c, va);
+    const cloneInput = { requestId: randomUUID(), variantCode: 'B' };
+    const clones = await Promise.all([1, 2].map(() => c.teacher.client.request<TestDetail>(`/tests/${a.id}/variants`, cloneInput)));
+    assert.ok(clones.every(r => r.status === 201)); assert.equal(clones[0]!.body.id, clones[1]!.body.id);
+    const b = clones[0]!.body; assert.notEqual(a.id, b.id); assert.equal(b.familyId, a.familyId); assert.equal(b.variantCode, 'B'); assert.equal(b.status, 'draft'); assert.equal(b.revision, 1); assert.equal(b.latestVersion, undefined);
+    const vb = (await c.teacher.client.request<TestVersion>(`/tests/${b.id}/publish`, { revision: 1 })).body;
+    assert.equal(va.number, 1); assert.equal(vb.number, 1); assert.equal(vb.variantCode, 'B');
+    const edited = await c.teacher.client.request<TestDetail>(`/tests/${b.id}`, { revision: 2, title: 'Общее новое имя', questions: [questions()[0]] }, 'PATCH');
+    assert.equal(edited.status, 200); assert.equal(edited.body.questionCount, 1);
+    const freshA = (await c.teacher.client.request<TestDetail>(`/tests/${a.id}`)).body;
+    assert.equal(freshA.title, 'Общее новое имя'); assert.equal(freshA.revision, 3); assert.equal(freshA.questionCount, 2);
+    assert.equal((await c.teacher.client.request(`/tests/${a.id}`, { revision: 2, title: 'Старое имя', questions: a.questions }, 'PATCH')).status, 409);
+    const immutableA = (await c.teacher.client.request<TestVersion>(`/test-versions/${va.id}`)).body;
+    assert.equal(immutableA.title, 'Арифметика'); assert.deepEqual(immutableA.questions, va.questions);
+    const attempt = await started(c, assignedA); const student = (await c.student.client.request<AttemptView>(`/attempts/${attempt.id}?role=student`)).body;
+    assert.equal(student.title, 'Арифметика'); assert.equal(student.totalQuestions, 2);
+    const simultaneous = await Promise.all([1, 2].map(() => c.teacher.client.request<TestDetail>(`/tests/${a.id}/variants`, { requestId: randomUUID(), variantCode: 'C' })));
+    assert.deepEqual(simultaneous.map(r => r.status).sort(), [201, 409]);
+    const variants = (await c.teacher.client.request<TestPage>(`/tests/${b.id}/variants`)).body;
+    assert.deepEqual(variants.items.map(t => t.variantCode), ['A', 'B', 'C']);
+    assert.deepEqual(variants.items.map(t => [t.questionCount, t.maxPoints]), [[2, 5], [1, 2], [2, 5]]);
+    assert.ok(variants.items.every(t => !Object.hasOwn(t, 'questions')));
+    await draft(c, questions(), { title: 'Другая семья' });
+    const families = (await c.teacher.client.request<TestFamilyPage>('/test-families?limit=1&offset=1')).body;
+    assert.equal(families.total, 2); assert.equal(families.items.length, 1); assert.equal(families.items[0]?.variants.length, 3);
+    assert.equal((await other.teacher.client.request(`/tests/${a.id}/variants`)).status, 404);
+    assert.equal((await other.teacher.client.request(`/tests/${a.id}/variants`, { requestId: randomUUID(), variantCode: 'D' })).status, 404);
+    assert.equal((await c.student.client.request('/test-families')).status, 403);
+    for (const variantCode of ['', 'AA', 'a', 'А', null]) assert.equal((await c.teacher.client.request(`/tests/${a.id}/variants`, { requestId: randomUUID(), variantCode })).status, 400);
+    await error(c.teacher.client, `/tests/${a.id}/variants`, { ...cloneInput, variantCode: 'D' }, 'idempotency_conflict');
+    assert.equal((await c.teacher.client.request<TestDetail>(`/tests/${a.id}/variants`, cloneInput)).body.id, b.id);
+    await assert.rejects(db.query('UPDATE tests SET family_id=$2 WHERE id=$1', [b.id, (await draft(other)).familyId]), { code: '23503' });
+  });
+
+  async function studentGroup(c: Context) {
+    const second = await account('student'); const secondEnrollment = randomUUID();
+    await db.query("INSERT INTO enrollments(id,teacher_id,student_id,subject_id,status,accepted_at,accepted_by) VALUES($1,$2,$3,$4,'active',now(),$5)", [secondEnrollment, c.teacher.profileId, second.profileId, c.subjectId, second.userId]);
+    const id = randomUUID();
+    await db.query("INSERT INTO student_groups(id,teacher_id,subject_id,name,timezone,request_id,request_payload) VALUES($1,$2,$3,'Учебная группа','Asia/Baku',$4,'{}')", [id, c.teacher.profileId, c.subjectId, randomUUID()]);
+    for (const enrollment of [c.enrollmentId, secondEnrollment]) await db.query('INSERT INTO student_group_members(group_id,enrollment_id,teacher_id,subject_id) VALUES($1,$2,$3,$4)', [id, enrollment, c.teacher.profileId, c.subjectId]);
+    return { id, second, secondEnrollment };
+  }
+
+  test('group assignments create an atomic immutable recipient snapshot, replay safely after roster changes and preserve ownership', async () => {
+    const c = await context(); const other = await context(); const group = await studentGroup(c); const v = await published(c);
+    const input = { requestId: randomUUID(), groupId: group.id, versionId: v.id, maxAttempts: 2, resultPolicy: 'after_submission', answerPolicy: 'never' };
+    const [first, duplicate] = await Promise.all([1, 2].map(() => c.teacher.client.request<GroupAssignmentView>('/test-group-assignments', input)));
+    assert.equal(first!.status, 201, JSON.stringify(first!.body)); assert.equal(duplicate!.status, 201);
+    assert.equal(first!.body.total, 2); assert.deepEqual(first!.body.items.map(a => a.id), duplicate!.body.items.map(a => a.id));
+    assert.ok(first!.body.items.every(a => a.groupId === group.id && a.groupName === 'Учебная группа' && a.variantCode === 'A' && a.resultPolicy === 'after_submission'));
+    assert.equal((await db.query('SELECT id FROM test_group_assignments')).rowCount, 1);
+    assert.equal((await db.query('SELECT id FROM test_assignments')).rowCount, 2);
+    assert.equal((await db.query("SELECT id FROM notifications WHERE type='test_assigned'")).rowCount, 2);
+    await db.query('DELETE FROM student_group_members WHERE group_id=$1 AND enrollment_id=$2', [group.id, group.secondEnrollment]);
+    await db.query("UPDATE student_groups SET name='Новое имя',status='archived' WHERE id=$1", [group.id]);
+    const replay = await c.teacher.client.request<GroupAssignmentView>('/test-group-assignments', input);
+    assert.equal(replay.body.total, 2); assert.equal(replay.body.groupName, 'Учебная группа'); assert.deepEqual(replay.body.items.map(a => a.id), first!.body.items.map(a => a.id));
+    await error(c.teacher.client, '/test-group-assignments', { ...input, maxAttempts: 3 }, 'idempotency_conflict');
+    assert.equal((await c.teacher.client.request('/test-group-assignments', { ...input, requestId: randomUUID() })).status, 409);
+    assert.equal((await other.teacher.client.request('/test-group-assignments', { ...input, requestId: randomUUID() })).status, 404);
+    assert.equal((await c.student.client.request('/test-group-assignments', input)).status, 403);
+    const student = (await c.student.client.request<AssignmentPage>('/test-assignments?role=student')).body;
+    assert.equal(student.total, 1); assert.equal(student.items[0]?.studentName, 'student'); assert.equal(Object.hasOwn(student.items[0]!, 'members'), false);
+    const mismatched = await published(other);
+    await db.query("UPDATE student_groups SET status='active' WHERE id=$1", [group.id]);
+    assert.equal((await c.teacher.client.request('/test-group-assignments', { ...input, requestId: randomUUID(), versionId: mismatched.id })).status, 404);
+  });
+
+  test('group assignment excludes inactive members and rolls every recipient and notification back on a mid-batch failure', async () => {
+    const c = await context(); const group = await studentGroup(c); const v = await published(c);
+    const input = { requestId: randomUUID(), groupId: group.id, versionId: v.id };
+    await db.query("UPDATE enrollments SET status='paused' WHERE id=$1", [group.secondEnrollment]);
+    const filtered = await c.teacher.client.request<GroupAssignmentView>('/test-group-assignments', input);
+    assert.equal(filtered.status, 201); assert.equal(filtered.body.total, 1); assert.equal(filtered.body.items[0]?.enrollmentId, c.enrollmentId);
+    assert.equal(filtered.body.items[0]?.resultPolicy, 'after_teacher_publish');
+    await db.query("UPDATE enrollments SET status='paused' WHERE id=$1", [c.enrollmentId]);
+    assert.equal((await c.teacher.client.request('/test-group-assignments', { ...input, requestId: randomUUID() })).status, 409);
+    await db.query("UPDATE enrollments SET status='active' WHERE id=ANY($1::uuid[])", [[c.enrollmentId, group.secondEnrollment]]);
+    const lastEnrollment = [c.enrollmentId, group.secondEnrollment].sort()[1]!;
+    await db.query(`CREATE FUNCTION test_reject_group_recipient() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      IF NEW.enrollment_id='${lastEnrollment}'::uuid THEN RAISE EXCEPTION 'Synthetic recipient failure'; END IF; RETURN NEW; END $$;
+      CREATE TRIGGER reject_test_group_recipient BEFORE INSERT ON test_assignments FOR EACH ROW EXECUTE FUNCTION test_reject_group_recipient()`);
+    const retryInput = { ...input, requestId: randomUUID() };
+    try {
+      const failed = await c.teacher.client.request('/test-group-assignments', retryInput); assert.equal(failed.status, 500);
+      assert.equal((await db.query('SELECT id FROM test_group_assignments')).rowCount, 1); assert.equal((await db.query('SELECT id FROM test_assignments')).rowCount, 1);
+      assert.equal((await db.query("SELECT id FROM notifications WHERE type='test_assigned'")).rowCount, 1);
+    } finally { await db.query('DROP TRIGGER reject_test_group_recipient ON test_assignments; DROP FUNCTION test_reject_group_recipient()'); }
+    const done = await c.teacher.client.request<GroupAssignmentView>('/test-group-assignments', retryInput); assert.equal(done.status, 201); assert.equal(done.body.total, 2);
   });
 });

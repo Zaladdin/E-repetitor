@@ -7,6 +7,7 @@ import { readConfig } from '../src/config';
 import { Database } from '../src/database';
 import { hashToken, newToken, Role } from '../src/common';
 import { migrate } from '../src/migrate';
+import { resetTestDatabase } from './reset-database';
 import { OverviewView } from '../src/overview.dto';
 
 const origin = 'http://127.0.0.1:3000';
@@ -19,7 +20,7 @@ describe('PostgreSQL unified account overview', { concurrency: false }, () => {
     app = await createApp(readConfig({ ...process.env, DATABASE_URL: databaseUrl, WEB_ORIGIN: origin, NODE_ENV: 'test' }), { send: async () => undefined });
     await app.listen(0, '127.0.0.1'); base = `${await app.getUrl()}/api/v1`; db = app.get(Database);
   });
-  beforeEach(async () => { await db.query('TRUNCATE users, rate_limits CASCADE'); });
+  beforeEach(() => resetTestDatabase(db));
   after(async () => { if (app) await app.close(); });
 
   async function account(role: Role) {
@@ -74,8 +75,9 @@ describe('PostgreSQL unified account overview', { concurrency: false }, () => {
   async function assignment(c: Enrollment, maxAttempts = 3, dueDays: number | null = null) {
     const testId = randomUUID(); const versionId = randomUUID(); const id = randomUUID();
     const questions = JSON.stringify([{ id: randomUUID(), type: 'text', prompt: 'PRIVATE QUESTION', points: 10, options: [], correctOptionIds: [] }]);
-    await db.query(`INSERT INTO tests(id,teacher_id,subject_id,request_id,request_payload,title,questions,status)
-      VALUES($1,$2,$3,$4,'{}','Тест',$5,'published')`, [testId, c.teacher.profileId, c.subjectId, randomUUID(), questions]);
+    await db.query("INSERT INTO test_families(id,teacher_id,subject_id,title) VALUES($1,$2,$3,'Тест')", [testId, c.teacher.profileId, c.subjectId]);
+    await db.query(`INSERT INTO tests(id,family_id,teacher_id,subject_id,request_id,request_payload,title,questions,status)
+      VALUES($1,$1,$2,$3,$4,'{}','Тест',$5,'published')`, [testId, c.teacher.profileId, c.subjectId, randomUUID(), questions]);
     await db.query(`INSERT INTO test_versions(id,test_id,teacher_id,subject_id,number,draft_revision,title,instruction,questions,max_points)
       VALUES($1,$2,$3,$4,1,1,'Тест','PRIVATE INSTRUCTION',$5,10)`, [versionId, testId, c.teacher.profileId, c.subjectId, questions]);
     await db.query(`INSERT INTO test_assignments(id,test_id,version_id,teacher_id,student_id,subject_id,enrollment_id,request_id,request_payload,max_attempts,due_at)

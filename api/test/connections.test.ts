@@ -7,6 +7,7 @@ import { readConfig } from '../src/config';
 import { Database } from '../src/database';
 import { hashToken, newToken, Role } from '../src/common';
 import { migrate } from '../src/migrate';
+import { resetTestDatabase } from './reset-database';
 import { EnrollmentPage, ParentChildrenPage, ParentConnectionPage } from '../src/connections.dto';
 
 const origin = 'http://127.0.0.1:3000';
@@ -26,7 +27,7 @@ describe('PostgreSQL connections API', { concurrency: false }, () => {
     await app.listen(0, '127.0.0.1');
     base = `${await app.getUrl()}/api/v1`; db = app.get(Database);
   });
-  beforeEach(async () => { await db.query('TRUNCATE users, rate_limits CASCADE'); });
+  beforeEach(() => resetTestDatabase(db));
   after(async () => { if (app) await app.close(); });
 
   class Client {

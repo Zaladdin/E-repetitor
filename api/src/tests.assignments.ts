@@ -5,17 +5,18 @@ import { ApiError, ApiRequest, Role, audit, lockActiveSession } from './common';
 import { Database } from './database';
 import { isOffsetDateTime } from './lessons.dto';
 import { notifyAssignment } from './notifications.events';
-import { AnswerPolicy, AssignmentPage, AssignmentQueryDto, AssignmentView, CreateAssignmentDto, Question } from './tests.dto';
+import { AnswerPolicy, AssignmentPage, AssignmentQueryDto, AssignmentView, CreateAssignmentDto, CreateGroupAssignmentDto, GroupAssignmentView, Question, ResultPolicy } from './tests.dto';
 import { AttemptRow, attemptSummary, conflictTest, invalidTest, iso, missingTest, testProfile } from './tests.shared';
 
 export type AssignmentRow = { id: string; test_id: string; version_id: string; teacher_id: string; student_id: string; subject_id: string; enrollment_id: string;
-  max_attempts: number; time_limit_min: number | null; due_at: Date | null; answer_policy: AnswerPolicy; created_at: Date;
+  family_id: string; variant_code: string; group_id: string | null; group_name: string | null;
+  max_attempts: number; time_limit_min: number | null; due_at: Date | null; answer_policy: AnswerPolicy; result_policy: ResultPolicy; created_at: Date;
   title: string; instruction: string; topic: string | null; pass_points: string | null; questions: Question[]; max_points: number; version_number: number;
   subject_name: string; student_name: string; student_public_id: string; teacher_name: string; enrollment_status: string; student_status: string; server_now: Date };
-const select = `SELECT a.*,v.title,v.instruction,v.topic,v.pass_points,v.questions,v.max_points,v.number AS version_number,
+const select = `SELECT a.*,v.title,v.instruction,v.topic,v.pass_points,v.questions,v.max_points,v.number AS version_number,td.family_id,td.variant_code,ga.group_id,ga.group_name,
   sub.name AS subject_name,su.name AS student_name,s.public_id AS student_public_id,tu.name AS teacher_name,
   e.status AS enrollment_status,su.status AS student_status,clock_timestamp() AS server_now
-  FROM test_assignments a JOIN test_versions v ON v.id=a.version_id JOIN enrollments e ON e.id=a.enrollment_id
+  FROM test_assignments a JOIN test_versions v ON v.id=a.version_id JOIN tests td ON td.id=a.test_id LEFT JOIN test_group_assignments ga ON ga.id=a.group_assignment_id JOIN enrollments e ON e.id=a.enrollment_id
   JOIN student_profiles s ON s.id=a.student_id JOIN users su ON su.id=s.user_id
   JOIN teacher_profiles t ON t.id=a.teacher_id JOIN users tu ON tu.id=t.user_id JOIN subjects sub ON sub.id=a.subject_id`;
 export function assignmentScope(role: Role, index = 1) {
@@ -42,10 +43,11 @@ export class TestAssignmentsService {
     const attempts = loaded ?? (await client.query<AttemptRow>(`SELECT * FROM test_attempts WHERE assignment_id=$1 ${role === 'parent' ? "AND status='published'" : ''} ORDER BY number`, [row.id])).rows;
     return { id: row.id, testId: row.test_id, versionId: row.version_id, versionNumber: row.version_number, title: row.title,
       subjectName: row.subject_name, studentName: row.student_name, studentPublicId: row.student_public_id, teacherName: row.teacher_name,
+      familyId: row.family_id, variantCode: row.variant_code, ...(row.group_id ? { groupId: row.group_id, groupName: row.group_name! } : {}),
       enrollmentId: row.enrollment_id, maxAttempts: row.max_attempts, ...(row.time_limit_min === null ? {} : { timeLimitMin: row.time_limit_min }),
-      ...(row.due_at === null ? {} : { dueAt: iso(row.due_at) }), answerPolicy: row.answer_policy, createdAt: iso(row.created_at),
+      ...(row.due_at === null ? {} : { dueAt: iso(row.due_at) }), answerPolicy: row.answer_policy, resultPolicy: row.result_policy, createdAt: iso(row.created_at),
       isLate: row.due_at !== null && new Date(row.due_at).getTime() < new Date(row.server_now).getTime(),
-      attempts: attempts.map(a => attemptSummary(a, role, row.pass_points)) };
+      attempts: attempts.map(a => attemptSummary(a, role, row.pass_points, row.questions, row.result_policy)) };
   }
   async list(req: ApiRequest, query: AssignmentQueryDto): Promise<AssignmentPage> {
     return this.db.transaction(async client => {
@@ -85,8 +87,8 @@ export class TestAssignmentsService {
     return this.db.transaction(async client => {
       const user = await lockActiveSession(client, req); const teacher = await testProfile(client, user, 'teacher');
       const payload = JSON.stringify({ versionId: dto.versionId.toLowerCase(), enrollmentId: dto.enrollmentId.toLowerCase(), maxAttempts: dto.maxAttempts,
-        timeLimitMin: dto.timeLimitMin ?? null, dueAt: dto.dueAt ? iso(dto.dueAt) : null, answerPolicy: dto.answerPolicy });
-      const previous = await client.query<{ id: string; same: boolean }>('SELECT id,request_payload=$3::jsonb AS same FROM test_assignments WHERE teacher_id=$1 AND request_id=$2', [teacher, dto.requestId, payload]);
+        timeLimitMin: dto.timeLimitMin ?? null, dueAt: dto.dueAt ? iso(dto.dueAt) : null, answerPolicy: dto.answerPolicy, resultPolicy: dto.resultPolicy });
+      const previous = await client.query<{ id: string; same: boolean }>(`SELECT id,('{"resultPolicy":"after_teacher_publish"}'::jsonb || request_payload)=$3::jsonb AS same FROM test_assignments WHERE teacher_id=$1 AND request_id=$2`, [teacher, dto.requestId, payload]);
       if (previous.rows[0]) {
         if (!previous.rows[0].same) throw new ApiError(409, 'idempotency_conflict', 'Этот ключ запроса уже использован с другими данными.');
         return this.view(client, await this.row(client, teacher, 'teacher', previous.rows[0].id), 'teacher');
@@ -94,19 +96,69 @@ export class TestAssignmentsService {
       const initial = await client.query<{ student_id: string }>('SELECT student_id FROM enrollments WHERE id=$1 AND teacher_id=$2', [dto.enrollmentId, teacher]);
       if (!initial.rows[0]) throw missingTest();
       await client.query('SELECT id FROM student_profiles WHERE id=$1 FOR UPDATE', [initial.rows[0].student_id]);
-      const enrollment = await client.query<{ student_id: string; subject_id: string; status: string; student_status: string }>(`SELECT e.student_id,e.subject_id,e.status,u.status AS student_status FROM enrollments e JOIN student_profiles s ON s.id=e.student_id JOIN users u ON u.id=s.user_id WHERE e.id=$1 AND e.teacher_id=$2 FOR UPDATE OF e`, [dto.enrollmentId, teacher]);
+      const enrollment = await client.query<{ student_id: string; subject_id: string; status: string; student_status: string; accepted_at: Date | null }>(`SELECT e.student_id,e.subject_id,e.status,e.accepted_at,u.status AS student_status FROM enrollments e JOIN student_profiles s ON s.id=e.student_id JOIN users u ON u.id=s.user_id WHERE e.id=$1 AND e.teacher_id=$2 FOR UPDATE OF e`, [dto.enrollmentId, teacher]);
       const e = enrollment.rows[0]; if (!e) throw missingTest();
-      if (e.status !== 'active' || e.student_status !== 'active') throw conflictTest('Назначить тест можно активному ученику с подтверждённой записью.');
+      if (e.status !== 'active' || e.student_status !== 'active' || !e.accepted_at) throw conflictTest('Назначить тест можно активному ученику с подтверждённой записью.');
       const version = await client.query<{ test_id: string; subject_id: string; status: string }>('SELECT v.test_id,v.subject_id,t.status FROM test_versions v JOIN tests t ON t.id=v.test_id WHERE v.id=$1 AND v.teacher_id=$2 FOR UPDATE OF t', [dto.versionId, teacher]);
       const v = version.rows[0]; if (!v || v.subject_id !== e.subject_id) throw missingTest();
       if (v.status === 'archived') throw conflictTest('Архивный тест нельзя назначить заново.');
       const id = randomUUID();
-      const inserted = await client.query(`INSERT INTO test_assignments(id,test_id,version_id,teacher_id,student_id,subject_id,enrollment_id,request_id,request_payload,max_attempts,time_limit_min,due_at,answer_policy)
-        SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12::timestamptz,$13 WHERE $12::timestamptz IS NULL OR $12::timestamptz>clock_timestamp() RETURNING id`,
-      [id, v.test_id, dto.versionId, teacher, e.student_id, e.subject_id, dto.enrollmentId, dto.requestId, payload, dto.maxAttempts, dto.timeLimitMin ?? null, dto.dueAt ?? null, dto.answerPolicy]);
+      const inserted = await client.query(`INSERT INTO test_assignments(id,test_id,version_id,teacher_id,student_id,subject_id,enrollment_id,request_id,request_payload,max_attempts,time_limit_min,due_at,answer_policy,result_policy)
+        SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12::timestamptz,$13,$14 WHERE $12::timestamptz IS NULL OR $12::timestamptz>clock_timestamp() RETURNING id`,
+      [id, v.test_id, dto.versionId, teacher, e.student_id, e.subject_id, dto.enrollmentId, dto.requestId, payload, dto.maxAttempts, dto.timeLimitMin ?? null, dto.dueAt ?? null, dto.answerPolicy, dto.resultPolicy]);
       if (!inserted.rows[0]) throw invalidTest('Срок сдачи должен быть в будущем.');
       await audit(client, user, 'test.assigned', id); await notifyAssignment(client, id);
       return this.view(client, await this.row(client, teacher, 'teacher', id), 'teacher');
+    });
+  }
+  async createGroup(req: ApiRequest, dto: CreateGroupAssignmentDto): Promise<GroupAssignmentView> {
+    if (dto.dueAt !== undefined && !isOffsetDateTime(dto.dueAt)) throw invalidTest('Укажите существующий срок с часовым поясом.');
+    if (dto.answerPolicy === 'after_deadline' && !dto.dueAt) throw invalidTest('Для показа ответов после срока укажите срок сдачи.');
+    return this.db.transaction(async client => {
+      const user = await lockActiveSession(client, req); const teacher = await testProfile(client, user, 'teacher');
+      const payload = JSON.stringify({ versionId: dto.versionId.toLowerCase(), groupId: dto.groupId.toLowerCase(), maxAttempts: dto.maxAttempts,
+        timeLimitMin: dto.timeLimitMin ?? null, dueAt: dto.dueAt ? iso(dto.dueAt) : null, answerPolicy: dto.answerPolicy, resultPolicy: dto.resultPolicy });
+      const previous = await client.query<{ id: string; group_id: string; group_name: string; same: boolean }>('SELECT id,group_id,group_name,request_payload=$3::jsonb AS same FROM test_group_assignments WHERE teacher_id=$1 AND request_id=$2', [teacher, dto.requestId, payload]);
+      const response = async (batchId: string, groupId: string, groupName: string): Promise<GroupAssignmentView> => {
+        const rows = await client.query<AssignmentRow>(`${select} WHERE a.group_assignment_id=$1 AND a.teacher_id=$2 ORDER BY a.enrollment_id`, [batchId, teacher]);
+        const items: AssignmentView[] = [];
+        for (const row of rows.rows) items.push(await this.view(client, row, 'teacher'));
+        return { items, total: items.length, groupId, groupName };
+      };
+      if (previous.rows[0]) {
+        const previousBatch = previous.rows[0];
+        if (!previousBatch.same) throw new ApiError(409, 'idempotency_conflict', 'Этот ключ запроса уже использован с другими данными.');
+        return response(previousBatch.id, previousBatch.group_id, previousBatch.group_name);
+      }
+      const group = (await client.query<{ id: string; name: string; subject_id: string; status: string }>('SELECT id,name,subject_id,status FROM student_groups WHERE id=$1 AND teacher_id=$2', [dto.groupId, teacher])).rows[0];
+      if (!group) throw missingTest();
+      if (group.status !== 'active') throw conflictTest('Архивной группе нельзя назначить тест.');
+      const members = await client.query<{ enrollment_id: string; student_id: string }>(`SELECT m.enrollment_id,e.student_id FROM student_group_members m JOIN enrollments e ON e.id=m.enrollment_id
+        WHERE m.group_id=$1 AND m.teacher_id=$2 ORDER BY m.enrollment_id LIMIT 51`, [group.id, teacher]);
+      if (members.rows.length > 50) throw conflictTest('В группе может быть не более 50 учеников.');
+      await client.query('SELECT id FROM student_profiles WHERE id=ANY($1::uuid[]) ORDER BY id FOR UPDATE', [[...new Set(members.rows.map(m => m.student_id))]]);
+      await client.query('SELECT id FROM enrollments WHERE id=ANY($1::uuid[]) ORDER BY id FOR UPDATE', [members.rows.map(m => m.enrollment_id)]);
+      await client.query('SELECT id FROM student_groups WHERE id=$1 FOR UPDATE', [group.id]);
+      const eligible = await client.query<{ enrollment_id: string; student_id: string }>(`SELECT m.enrollment_id,e.student_id FROM student_group_members m JOIN enrollments e ON e.id=m.enrollment_id
+        JOIN student_profiles s ON s.id=e.student_id JOIN users u ON u.id=s.user_id
+        WHERE m.group_id=$1 AND m.teacher_id=$2 AND m.subject_id=$3 AND e.status='active' AND e.accepted_at IS NOT NULL AND u.status='active' ORDER BY m.enrollment_id`, [group.id, teacher, group.subject_id]);
+      if (!eligible.rows.length) throw conflictTest('В группе нет активных учеников для назначения теста.');
+      const version = (await client.query<{ test_id: string; subject_id: string; status: string }>('SELECT v.test_id,v.subject_id,t.status FROM test_versions v JOIN tests t ON t.id=v.test_id WHERE v.id=$1 AND v.teacher_id=$2 FOR UPDATE OF t', [dto.versionId, teacher])).rows[0];
+      if (!version || version.subject_id !== group.subject_id) throw missingTest();
+      if (version.status === 'archived') throw conflictTest('Архивный тест нельзя назначить заново.');
+      const batchId = randomUUID();
+      await client.query(`INSERT INTO test_group_assignments(id,teacher_id,group_id,group_name,subject_id,test_id,version_id,request_id,request_payload)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)`, [batchId, teacher, group.id, group.name, group.subject_id, version.test_id, dto.versionId, dto.requestId, payload]);
+      for (const member of eligible.rows) {
+        const id = randomUUID();
+        const inserted = await client.query(`INSERT INTO test_assignments(id,test_id,version_id,teacher_id,student_id,subject_id,enrollment_id,request_id,request_payload,max_attempts,time_limit_min,due_at,answer_policy,result_policy,group_assignment_id)
+          SELECT $1,$2,$3,$4,$5,$6,$7,$1,$8::jsonb,$9,$10,$11::timestamptz,$12,$13,$14 WHERE $11::timestamptz IS NULL OR $11::timestamptz>clock_timestamp() RETURNING id`,
+        [id, version.test_id, dto.versionId, teacher, member.student_id, group.subject_id, member.enrollment_id, payload, dto.maxAttempts, dto.timeLimitMin ?? null, dto.dueAt ?? null, dto.answerPolicy, dto.resultPolicy, batchId]);
+        if (!inserted.rows[0]) throw invalidTest('Срок сдачи должен быть в будущем.');
+        await audit(client, user, 'test.assigned', id); await notifyAssignment(client, id);
+      }
+      await audit(client, user, 'test.group_assigned', batchId);
+      return response(batchId, group.id, group.name);
     });
   }
 }

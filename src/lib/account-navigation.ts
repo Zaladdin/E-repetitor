@@ -13,6 +13,7 @@ export function accountSectionHref(id: AccountSectionId): string {
 }
 
 export function accountSectionFromPath(path: string): AccountSectionId | null {
+  if (/^\/account\/tests\/(new|edit)\/?$/.test(path)) return 'account-tests-section';
   if (path === '/' || path.replace(/\/$/, '') === '/account') return 'account-overview-section';
   return ACCOUNT_SECTION_IDS.find(id => accountSectionHref(id).replace(/\/$/, '') === path.replace(/\/$/, '')) ?? null;
 }

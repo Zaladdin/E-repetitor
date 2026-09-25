@@ -3,13 +3,14 @@ import { schedulingMessages } from './i18n/scheduling';
 import { learningMessages } from './i18n/learning';
 import { workspaceMessages } from './i18n/workspace';
 import { serverMessages } from './i18n/server';
+import { testFeatureMessages } from './i18n/test-features';
 
 export type Locale = 'ru' | 'az' | 'en';
 export type MessageValues = Record<string, string | number>;
 export const LOCALE_STORAGE_KEY = 'e-repetitor-language';
 export const LOCALES: readonly Locale[] = ['ru', 'az', 'en'];
 export const messages: Readonly<Record<string, readonly [string, string]>> = {
-  ...workspaceMessages, ...learningMessages, ...schedulingMessages, ...serverMessages, ...coreMessages,
+  ...workspaceMessages, ...learningMessages, ...schedulingMessages, ...serverMessages, ...coreMessages, ...testFeatureMessages,
 };
 
 let currentLocale: Locale = 'ru';

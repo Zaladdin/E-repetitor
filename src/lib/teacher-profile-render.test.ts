@@ -6,7 +6,7 @@ import { TeacherProfileFields } from '@/components/teacher-profile-fields';
 import type { Account } from './account-api';
 import { ACCOUNT_SECTION_IDS, type AccountSectionId } from './account-navigation';
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), usePathname: () => '/account/tests/' }));
 
 const account: Account = { id: 'me', name: 'Анна Иванова', email: 'teacher@example.test', status: 'active', roles: ['teacher'],
   profiles: { teacher: { id: 'teacher-1', timezone: 'Asia/Baku', phone: '+994501234567', birthDate: '1990-02-28' } } };

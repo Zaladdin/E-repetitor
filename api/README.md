@@ -296,8 +296,12 @@ require an explicit `role=teacher|student|parent`; no client owner ID is accepte
 | POST | `/tests/:id/archive` | `revision` | Archived `TestDetail` |
 | GET | `/tests/:id/versions` | `limit,offset` | Version summary page |
 | GET | `/test-versions/:id` | — | Owned immutable version including keys |
+| GET | `/test-families` | `limit,offset` | Family page with complete variant summaries |
+| GET | `/tests/:id/variants` | `limit,offset` | Variant summaries in the same owned family |
+| POST | `/tests/:id/variants` | `requestId,variantCode` | Independent draft copied from the selected variant |
 | GET | `/test-assignments` | `role,limit,offset`, optional `testId` | Assignment page with scoped attempt summaries |
-| POST | `/test-assignments` | `requestId,versionId,enrollmentId`, optional `maxAttempts,timeLimitMin,dueAt,answerPolicy` | `TestAssignment` |
+| POST | `/test-assignments` | `requestId,versionId,enrollmentId`, optional `maxAttempts,timeLimitMin,dueAt,answerPolicy,resultPolicy` | `TestAssignment` |
+| POST | `/test-group-assignments` | Same settings, `groupId` instead of `enrollmentId` | Atomic batch `{items,total,groupId,groupName}` |
 | POST | `/test-assignments/:id/attempts` | `requestId` | Student attempt mutation |
 | GET | `/attempts/:id` | `role` | Role-specific `TestAttempt` |
 | PATCH | `/attempts/:id/answers` | `version,answers` (full replacement) | Attempt mutation |
@@ -328,6 +332,21 @@ Creation and assignment use per-teacher request UUIDs with payload equality;
 publishing the same draft revision returns the original version without another
 event. Other draft mutations require revision CAS.
 
+Migration 013 gives each existing test its own family and variant A. New variants
+use labels A–Z, copy the selected draft, and retain independent questions, settings,
+revisions and published versions. `/test-families` paginates families with all their
+variants, so a library card is not split across pages. Renaming a family updates
+its editable variants and increments their revisions; published snapshots retain
+their original title and content. Variant creation is idempotent by request UUID.
+
+Group assignment snapshots the group's eligible active enrollments for the same
+subject. One transaction creates a batch journal and an individual assignment per
+recipient; all recipients receive the selected version of the selected variant.
+A retry with the same request UUID and payload returns the original batch even
+after membership changes. Changed payloads conflict. Group ID/name accompany each
+assignment, and each learner keeps independent attempts. The journal has no delete
+route. Audit events include `test.variant_created` and `test.group_assigned`.
+
 Assignments require an active accepted enrollment, active student, owned version
 and matching subject. Defaults are one attempt and hidden answer keys (`never`).
 Bounds are 1–10 attempts and optional 1–180-minute timer. An optional future
@@ -346,7 +365,16 @@ every text question requires manual grading, including blanks. Text grades allow
 0..question maximum with two decimals. Teacher review may be revised with audit
 until publication; published results are immutable in this milestone.
 
-Student totals, grades and teacher comments are omitted until publication. Keys
+The assignment's separate `resultPolicy` controls student totals and overall comments:
+`after_submission` reveals a fully graded result, while `after_teacher_publish`
+waits for explicit publication. Existing assignments and API callers that omit
+this setting retain `after_teacher_publish`. Manual questions must be graded before
+either policy can reveal the final result. Attempt summaries include `totalQuestions`,
+`resultVisibility`, and, when final and visible, `correctAnswers` and `passed`.
+`correctAnswers` counts full-credit questions, not earned points. An omitted passing
+threshold uses 60% of the immutable version's maximum; explicit thresholds take priority.
+Students receive per-question grades when the final result is visible; teachers
+can also see preliminary grades during review. Keys
 and explanations follow `never|after_submission|after_deadline|after_teacher_publish`
 for that student's submitted attempt; started/expired/abandoned attempts never
 receive keys. Parents receive only published totals/overall comments through

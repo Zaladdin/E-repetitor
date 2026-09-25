@@ -6,7 +6,7 @@ import { localeTag } from '@/lib/i18n';
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { BookOpen, Copy, GraduationCap, LogOut, Plus } from 'lucide-react';
 import { accountApi, accountErrorMessage, accountSessionChanged, isStaleAccountRequest, type Account, type AccountRole, type AccountSubject, type AddAccountRoleInput } from '@/lib/account-api';
 import { readTeacherProfile, RegistrationValidationError } from '@/lib/account-registration';
@@ -35,7 +35,19 @@ export function AccountDashboard({ account, section = 'account-overview-section'
 }) {
   const { t } = useI18n();
   const router = useRouter();
-  const [role, setRole] = useState<AccountRole>(account.roles[0]);
+  const pathname = usePathname();
+  const [role, setRole] = useState<AccountRole>(() => {
+    if (/^\/account\/tests\/(new|edit)\/?$/.test(pathname ?? '') && account.roles.includes('teacher')) return 'teacher';
+    try {
+      const saved = window.sessionStorage.getItem(`account-role:${account.id}`);
+      if (account.roles.includes(saved as AccountRole)) return saved as AccountRole;
+    } catch { /* Storage may be unavailable; use the account's default role. */ }
+    return account.roles[0];
+  });
+  useEffect(() => {
+    try { window.sessionStorage.setItem(`account-role:${account.id}`, role); }
+    catch { /* Role selection remains usable when browser storage is disabled. */ }
+  }, [account.id, role]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [teacherRoleOpen, setTeacherRoleOpen] = useState(false);
@@ -126,7 +138,7 @@ export function AccountDashboard({ account, section = 'account-overview-section'
   return <div className="account-dashboard">
     {navigationHost && createPortal(<>
       <AccountNavigation role={role} isAdmin={account.isAdmin} active={section} unreadNotifications={unreadNotifications} />
-      <button className="button secondary account-header-logout" onClick={() => void logout()} disabled={busy}><LogOut size={18} aria-hidden="true" />{t("Выйти")}</button>
+      <button data-account-logout className="button secondary account-header-logout" onClick={() => void logout()} disabled={busy}><LogOut size={18} aria-hidden="true" />{t("Выйти")}</button>
     </>, navigationHost)}
     <header className="account-dashboard-heading">
       <div><h1 ref={headingRef} tabIndex={-1}>{account.name}</h1><p className="account-email">{account.email}</p></div>

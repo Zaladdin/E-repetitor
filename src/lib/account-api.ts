@@ -1,5 +1,5 @@
 import type { AccountLesson, AttendanceInput, CancelLessonInput, CreateLessonInput, LessonEvent, LessonMutationResult, RescheduleLessonInput } from './account-lessons';
-import type { AssignTestInput, AttemptMutation, CreateTestInput, ReviewAttemptInput, TestAnswer, TestAssignment, TestAttempt, TestDetail, TestDraftInput, TestSummary, TestVersion, TestVersionSummary } from './account-tests';
+import type { AssignGroupTestInput, AssignTestInput, AttemptMutation, CreateTestInput, CreateTestVariantInput, GroupTestAssignmentResult, ReviewAttemptInput, TestAnswer, TestAssignment, TestAttempt, TestDetail, TestDraftInput, TestFamily, TestSummary, TestVersion, TestVersionSummary } from './account-tests';
 import type { CancelPaymentRecordInput, CreatePaymentRecordInput, MarkPaymentInput, PaymentFilter, PaymentHistoryEvent, PaymentRecord } from './account-payments';
 import type { ChargePackageInput, ClosePackageInput, CreatePackageInput, LessonPackage, PackageHistoryEvent, PackageLesson, ReversePackageChargeInput } from './account-packages';
 import type { AccountOverviewData } from './account-overview';
@@ -153,7 +153,7 @@ export function createAccountApi(
     assertCurrent();
     // Refresh summaries after committed domain changes, never on answer autosave.
     if (options.expectedAccountId && options.body !== undefined
-      && /^\/(enrollments|parent-connections|lessons|test-assignments|attempts|payment-records|packages|groups)(\/|$)/.test(path)
+      && /^\/(enrollments|parent-connections|lessons|test-assignments|test-group-assignments|attempts|payment-records|packages|groups)(\/|$)/.test(path)
       && !path.endsWith('/answers')) {
       overviewChanges.dispatchEvent(new Event(options.expectedAccountId));
     }
@@ -248,6 +248,9 @@ export function createAccountApi(
     markAttendance: (accountId: string, id: string, data: AttendanceInput) => request<LessonMutationResult>(`/lessons/${encodeURIComponent(id)}/attendance`, { body: data, expectedAccountId: accountId }),
     lessonHistory: (accountId: string, id: string, offset = 0) => request<AccountPage<LessonEvent>>(`/lessons/${encodeURIComponent(id)}/history?limit=50&offset=${offset}`, { expectedAccountId: accountId }),
     tests: (accountId: string, offset = 0) => request<AccountPage<TestSummary>>(`/tests?limit=50&offset=${offset}`, { expectedAccountId: accountId }),
+    testFamilies: (accountId: string, offset = 0) => request<AccountPage<TestFamily>>(`/test-families?limit=50&offset=${offset}`, { expectedAccountId: accountId }),
+    testVariants: (accountId: string, id: string, offset = 0) => request<AccountPage<TestSummary>>(`/tests/${encodeURIComponent(id)}/variants?limit=50&offset=${offset}`, { expectedAccountId: accountId }),
+    createTestVariant: (accountId: string, id: string, data: CreateTestVariantInput) => request<TestDetail>(`/tests/${encodeURIComponent(id)}/variants`, { body: data, expectedAccountId: accountId }),
     test: (accountId: string, id: string) => request<TestDetail>(`/tests/${encodeURIComponent(id)}`, { expectedAccountId: accountId }),
     createTest: (accountId: string, data: CreateTestInput) => request<TestDetail>('/tests', { body: data, expectedAccountId: accountId }),
     saveTest: (accountId: string, id: string, data: TestDraftInput & { revision: number }) => request<TestDetail>(`/tests/${encodeURIComponent(id)}`, { method: 'PATCH', body: data, expectedAccountId: accountId }),
@@ -257,6 +260,7 @@ export function createAccountApi(
     testVersion: (accountId: string, id: string) => request<TestVersion>(`/test-versions/${encodeURIComponent(id)}`, { expectedAccountId: accountId }),
     testAssignments: (accountId: string, role: AccountRole, offset = 0) => request<AccountPage<TestAssignment>>(`/test-assignments?role=${role}&limit=50&offset=${offset}`, { expectedAccountId: accountId }),
     assignTest: (accountId: string, data: AssignTestInput) => request<TestAssignment>('/test-assignments', { body: data, expectedAccountId: accountId }),
+    assignGroupTest: (accountId: string, data: AssignGroupTestInput) => request<GroupTestAssignmentResult>('/test-group-assignments', { body: data, expectedAccountId: accountId }),
     startTestAttempt: (accountId: string, id: string, requestId: string) => request<AttemptMutation>(`/test-assignments/${encodeURIComponent(id)}/attempts`, { body: { requestId }, expectedAccountId: accountId }),
     testAttempt: (accountId: string, id: string, role: AccountRole) => request<TestAttempt>(`/attempts/${encodeURIComponent(id)}?role=${role}`, { expectedAccountId: accountId }),
     saveTestAnswers: (accountId: string, id: string, version: number, answers: TestAnswer[]) => request<AttemptMutation>(`/attempts/${encodeURIComponent(id)}/answers`, { method: 'PATCH', body: { version, answers }, expectedAccountId: accountId }),

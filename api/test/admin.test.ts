@@ -133,7 +133,11 @@ describe('PostgreSQL administrative access API', { concurrency: false }, () => {
     await db.query("INSERT INTO enrollments(id,teacher_id,student_id,subject_id,status,accepted_at,accepted_by) VALUES($1,$2,$3,$4,'active',now(),$5)", [enrollment, teacher.profileId, student.profileId, subject, student.userId]);
     for (const status of ['scheduled', 'completed']) await db.query(`INSERT INTO lessons(id,enrollment_id,teacher_id,student_id,request_id,request_payload,starts_at,duration_min,format,status,private_notes)
       VALUES($1,$2,$3,$4,$5,'{}',now(),30,'online',$6,'PRIVATE NOTES')`, [randomUUID(), enrollment, teacher.profileId, student.profileId, randomUUID(), status]);
-    for (const status of ['draft', 'published']) await db.query("INSERT INTO tests(id,teacher_id,subject_id,request_id,request_payload,title,questions,status) VALUES($1,$2,$3,$4,'{}','PRIVATE TEST','[]',$5)", [randomUUID(), teacher.profileId, subject, randomUUID(), status]);
+    for (const status of ['draft', 'published']) {
+      const testId = randomUUID();
+      await db.query("INSERT INTO test_families(id,teacher_id,subject_id,title) VALUES($1,$2,$3,'PRIVATE TEST')", [testId, teacher.profileId, subject]);
+      await db.query("INSERT INTO tests(id,family_id,teacher_id,subject_id,request_id,request_payload,title,questions,status) VALUES($1,$1,$2,$3,$4,'{}','PRIVATE TEST','[]',$5)", [testId, teacher.profileId, subject, randomUUID(), status]);
+    }
     const response = await admin.client.request<AdminOverviewView>('/admin/overview'); assert.equal(response.status, 200);
     assert.deepEqual(response.body.users, { total: 7, active: 3, suspended: 1, pendingVerification: 1, deactivated: 1, deleted: 1 });
     assert.deepEqual(response.body.enrollments, { total: 1, active: 1 }); assert.deepEqual(response.body.lessons, { total: 2, scheduled: 1 });

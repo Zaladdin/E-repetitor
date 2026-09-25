@@ -9,7 +9,7 @@ import { useConnectionActions } from './account-connections-state';
 import { ActionFeedback } from './account-connections';
 import { useTestResource } from './account-tests-state';
 import { newTestQuestion, TestPreview, TestQuestionEditor } from './test-builder-questions';
-import { Modal } from './ui';
+import { TestEditorShell } from './test-editor-shell';
 
 export function TestBuilder({ accountId, testId, onSessionChanged, onChanged, onClose }: {
   accountId: string; testId: string; onSessionChanged: () => void; onChanged: () => void; onClose: () => void;
@@ -17,7 +17,7 @@ export function TestBuilder({ accountId, testId, onSessionChanged, onChanged, on
   const { t } = useI18n();
   const load = useCallback(() => accountApi.test(accountId, testId), [accountId, testId]);
   const resource = useTestResource(load, onSessionChanged);
-  if (!resource.data) return <Modal title={t("Конструктор теста")} onClose={onClose}>{resource.loading ? <p role="status">{t("Загружаем тест…")}</p> : <div className="form-error"><p role="alert">{t(resource.error)}</p><button className="button secondary" onClick={resource.reload}>{t("Повторить")}</button></div>}</Modal>;
+  if (!resource.data) return <TestEditorShell title={t("Конструктор теста")} onClose={onClose}>{resource.loading ? <p role="status">{t("Загружаем тест…")}</p> : <div className="form-error"><p role="alert">{t(resource.error)}</p><button className="button secondary" onClick={resource.reload}>{t("Повторить")}</button></div>}</TestEditorShell>;
   return <DraftEditor key={`${resource.data.id}:${resource.data.revision}`} accountId={accountId} initial={resource.data} onSessionChanged={onSessionChanged} onSaved={detail => { resource.setData(detail); onChanged(); }} onPublished={() => { onChanged(); onClose(); }} onClose={onClose} onReload={resource.reload} />;
 }
 
@@ -33,17 +33,36 @@ function DraftEditor({ accountId, initial, onSessionChanged, onSaved, onPublishe
   const [preview, setPreview] = useState(false);
   const [confirmation, setConfirmation] = useState<'close' | 'reload' | 'publish' | null>(null);
   const alive = useRef(false);
+  const leaving = useRef(false);
   const confirmationRef = useRef<HTMLDivElement>(null);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => { if (confirmation) confirmationRef.current?.focus(); }, [confirmation]);
   const actions = useConnectionActions(onSessionChanged, () => {});
   const dirty = JSON.stringify(draft) !== JSON.stringify(draftOf(baseline));
   useEffect(() => {
-    if (!dirty) return;
-    const protect = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    const protect = (event: BeforeUnloadEvent) => { if (dirty && !leaving.current) { event.preventDefault(); event.returnValue = ''; } };
+    const protectLink = (event: MouseEvent) => {
+      if (!(event.target instanceof Element)) return;
+      const logout = event.target.closest('button[data-account-logout]');
+      const link = event.target.closest('a[href]');
+      if (!logout) {
+        if (!(link instanceof HTMLAnchorElement) || link.target === '_blank' || event.ctrlKey || event.metaKey || event.shiftKey) return;
+        const destination = new URL(link.href);
+        if (destination.origin === window.location.origin && destination.pathname === window.location.pathname && destination.search === window.location.search) return;
+      }
+      if (dirty && !window.confirm(t('Закрыть конструктор и потерять несохранённые изменения?'))) { event.preventDefault(); event.stopPropagation(); return; }
+      if (link instanceof HTMLAnchorElement) {
+        leaving.current = true;
+        event.preventDefault(); event.stopPropagation();
+        window.location.assign(link.href);
+      }
+    };
+    const restore = () => { leaving.current = false; };
+    window.addEventListener('pageshow', restore);
     window.addEventListener('beforeunload', protect);
-    return () => window.removeEventListener('beforeunload', protect);
-  }, [dirty]);
+    document.addEventListener('click', protectLink, true);
+    return () => { window.removeEventListener('pageshow', restore); window.removeEventListener('beforeunload', protect); document.removeEventListener('click', protectLink, true); };
+  }, [dirty, t]);
   const archived = initial.status === 'archived';
   const maxPoints = draft.questions.reduce((sum, question) => sum + question.points, 0);
   function close() { if (!actions.busy) { if (dirty) setConfirmation('close'); else onClose(); } }
@@ -52,6 +71,7 @@ function DraftEditor({ accountId, initial, onSessionChanged, onSaved, onPublishe
     setDraft(current => { const questions = [...current.questions]; [questions[index], questions[index + direction]] = [questions[index + direction], questions[index]]; return { ...current, questions }; });
   }
   async function save(publish = false) {
+    if (archived) return;
     let saved: TestDetail | undefined;
     const success = await actions.run(async () => {
       saved = dirty ? await accountApi.saveTest(accountId, initial.id, { ...draft, revision: baseline.revision }) : baseline;
@@ -65,16 +85,18 @@ function DraftEditor({ accountId, initial, onSessionChanged, onSaved, onPublishe
   function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); void save(); }
   function addQuestion(type: QuestionType) { setDraft(current => ({ ...current, questions: [...current.questions, newTestQuestion(type)] })); }
 
-  return <Modal title={archived ? t("Архивный тест") : t("Конструктор теста")} onClose={close}>
-    <div className="test-builder"><p className="muted">{initial.subjectName} · {draft.questions.length} {t(" вопросов · максимум ")}{maxPoints} {t(" балл.")}</p>
+  return <TestEditorShell title={archived ? t("Архивный тест") : t("Конструктор теста")} onClose={close}>
+    <div className="test-builder"><p className="muted">{t('Вариант {code}', { code: initial.variantCode })} · {initial.subjectName} · {draft.questions.length} {t(" вопросов · максимум ")}{maxPoints} {t(" балл.")}</p>
       <p className="account-list-help muted">{t("Изменения сохраняются в черновике. Каждая публикация создаёт отдельную версию; уже выданные тесты сохраняют прежние вопросы.")}</p>
       <div className="test-toolbar"><button type="button" className="button secondary small" onClick={() => setPreview(value => !value)} disabled={actions.busy}><Eye size={16} aria-hidden="true" />{preview ? t("Вернуться в конструктор") : t("Предпросмотр")}</button><span className="muted" role="status">{dirty ? t("Есть несохранённые изменения") : t("Черновик сохранён")}</span></div>
       {preview ? <TestPreview draft={draft} /> : <form className="account-form test-builder-form" onSubmit={submit}>
         <fieldset disabled={actions.busy || archived} className="test-form-fieldset">
           <label htmlFor={`${id}-title`}>{t("Название")}</label><input id={`${id}-title`} value={draft.title} maxLength={200} required onChange={event => setDraft({ ...draft, title: event.target.value })} />
+          <p className="account-list-help muted">{t('Название общее для всех вариантов. Вопросы, инструкция и проходной балл относятся только к этому варианту.')}</p>
           <label htmlFor={`${id}-topic`}>{t("Тема · необязательно")}</label><input id={`${id}-topic`} value={draft.topic ?? ''} maxLength={200} onChange={event => setDraft({ ...draft, topic: event.target.value })} />
           <label htmlFor={`${id}-instruction`}>{t("Инструкция ученику · необязательно")}</label><textarea id={`${id}-instruction`} rows={3} maxLength={4000} value={draft.instruction ?? ''} onChange={event => setDraft({ ...draft, instruction: event.target.value })} />
           <label htmlFor={`${id}-pass`}>{t("Проходной балл · необязательно")}</label><input id={`${id}-pass`} className="test-number-input" type="number" min={0} max={3000} step={0.01} value={passInput} onChange={event => { setPassInput(event.target.value); setDraft({ ...draft, passPoints: event.target.value === '' ? undefined : Number(event.target.value) }); }} />
+          <p className="account-list-help muted">{t('Если поле пустое, для прохождения нужно набрать не менее 60% баллов.')}</p>
           {draft.questions.map((question, index) => <TestQuestionEditor key={question.id} question={question} index={index} count={draft.questions.length} disabled={actions.busy || archived} onChange={updateQuestion} onMove={direction => moveQuestion(index, direction)} onRemove={() => setDraft({ ...draft, questions: draft.questions.filter(item => item.id !== question.id) })} />)}
           {!draft.questions.length && <p className="account-next-note">{t("Начните с первого вопроса. Для публикации понадобится хотя бы один заполненный вопрос.")}</p>}
           <div className="test-add-questions">{(['single_choice', 'multiple_choice', 'text'] as const).map(type => <button key={type} type="button" className="button secondary small" disabled={draft.questions.length >= 30} onClick={() => addQuestion(type)}><Plus size={15} aria-hidden="true" />{type === 'single_choice' ? t("Один вариант") : type === 'multiple_choice' ? t("Несколько вариантов") : t("Текстовый ответ")}</button>)}</div>
@@ -83,9 +105,9 @@ function DraftEditor({ accountId, initial, onSessionChanged, onSaved, onPublishe
       </form>}
       <ActionFeedback actions={actions} />
       {actions.error && <button className="text-button" disabled={actions.busy} onClick={() => setConfirmation('reload')}>{t("Загрузить актуальный черновик")}</button>}
-      {confirmation && <div className="test-confirmation" role="group" aria-label={t("Подтверждение действия")} tabIndex={-1} ref={confirmationRef}><p>{confirmation === 'publish' ? t("Сохранить изменения и опубликовать неизменяемую версию? После этого её можно назначить ученикам.") : confirmation === 'close' ? t("Закрыть конструктор и потерять несохранённые изменения?") : t("Загрузить черновик с сервера? Несохранённые изменения будут потеряны.")}</p><div className="form-actions"><button className="button secondary" disabled={actions.busy} onClick={() => setConfirmation(null)}>{t("Отмена")}</button><button className="button" disabled={actions.busy} onClick={() => { if (confirmation === 'publish') void save(true); else if (confirmation === 'close') onClose(); else onReload(); }}>{confirmation === 'publish' ? t("Опубликовать") : confirmation === 'close' ? t("Закрыть без сохранения") : t("Загрузить")}</button></div></div>}
+      {confirmation && <div className="test-confirmation" role="group" aria-label={t("Подтверждение действия")} tabIndex={-1} ref={confirmationRef}><p>{confirmation === 'publish' ? t("Сохранить изменения и опубликовать неизменяемую версию? После этого её можно назначить ученикам.") : confirmation === 'close' ? t("Закрыть конструктор и потерять несохранённые изменения?") : t("Загрузить черновик с сервера? Несохранённые изменения будут потеряны.")}</p><div className="form-actions"><button className="button secondary" disabled={actions.busy} onClick={() => setConfirmation(null)}>{t("Отмена")}</button><button className="button" disabled={actions.busy} onClick={() => { if (confirmation === 'publish') void save(true); else if (confirmation === 'close') { leaving.current = true; onClose(); } else onReload(); }}>{confirmation === 'publish' ? t("Опубликовать") : confirmation === 'close' ? t("Закрыть без сохранения") : t("Загрузить")}</button></div></div>}
     </div>
-  </Modal>;
+  </TestEditorShell>;
 }
 
 function draftOf(detail: TestDetail): TestDraftInput {

@@ -6,6 +6,7 @@ import { accountApi, accountErrorMessage, accountSessionChanged, isStaleAccountR
 import { ATTEMPT_LABELS, type PublicTestQuestion, type TestAnswer, type TestAttempt } from '@/lib/account-tests';
 import { TestAnswerAutosave } from '@/lib/test-answer-autosave';
 import { Modal } from './ui';
+import { TestResultSummary } from './test-result-summary';
 
 interface RunnerProps {
   accountId: string; attemptId: string; onSessionChanged: () => void; onClose: () => void; onChanged: () => void;
@@ -154,8 +155,8 @@ function AttemptEditor({ accountId, initial, onSessionChanged, onClose, onChange
       {isStarted && <div className="account-test-save-bar"><span>{t("Отвечено: ")}{answered} {t(" из ")}{total}</span>{remaining !== null && <span role="timer" aria-label={t("Осталось времени")}>{clock(remaining)}</span>}<span role="status">{saveState === 'saved' ? t("Все ответы сохранены") : saveState === 'saving' ? t("Сохраняем…") : saveState === 'dirty' ? t("Есть несохранённые изменения") : t("Не удалось сохранить ответы")}</span></div>}
       {isStarted && remaining === 0 && <p role="status" className="form-error">{t("Время вышло. Проверяем состояние попытки на сервере. Сохраняются только ответы, принятые до окончания времени.")}</p>}
       {(initial.status === 'expired' || initial.status === 'abandoned') && <p className="account-next-note">{t("Попытка закрыта и учитывается в лимите. Сохранённые ответы остаются в истории.")}</p>}
-      {!isStarted && initial.status !== 'published' && initial.status !== 'expired' && initial.status !== 'abandoned' && <p className="account-next-note">{t("Ответы сданы. Итоговые баллы и комментарии появятся после публикации преподавателем.")}</p>}
-      {initial.status === 'published' && initial.score !== undefined && <div className="account-test-result"><strong>{initial.score} {t(" из ")}{initial.maxPoints} · {initial.percentage}%</strong>{initial.passed !== undefined && <p>{initial.passed ? t("Проходной балл набран") : t("Проходной балл не набран")}</p>}{initial.comment && <p>{initial.comment}</p>}</div>}
+      {!isStarted && <TestResultSummary attempt={initial} />}
+      {initial.resultVisibility === 'visible' && initial.comment && <p className="test-preserve-text">{initial.comment}</p>}
 
       <div className="account-test-answer-list">{initial.questions?.map((question, index) => {
         const answer = answers.find(value => value.questionId === question.id);
@@ -168,7 +169,7 @@ function AttemptEditor({ accountId, initial, onSessionChanged, onClose, onChange
           {editing && question.type === 'single_choice' && selected.length > 0 && <button type="button" className="text-button" onClick={() => change(question, { selectedOptionIds: [] })}>{t("Очистить выбор")}</button>}
           {question.correctOptionIds !== undefined && <p className="account-test-key">{t("Правильный ответ: ")}{question.options.filter(option => question.correctOptionIds!.includes(option.id)).map(option => option.text).join('; ') || t("Текстовый ответ проверяет преподаватель")}</p>}
           {question.explanation && <p className="account-test-explanation">{question.explanation}</p>}
-          {initial.status === 'published' && grade && <p className="account-test-grade">{t("Баллы: ")}{grade.points} {t(" из ")}{question.points}{grade.comment ? ` · ${grade.comment}` : ''}</p>}
+          {initial.resultVisibility === 'visible' && grade && <p className="account-test-grade">{t("Баллы: ")}{grade.points} {t(" из ")}{question.points}{grade.comment ? ` · ${grade.comment}` : ''}</p>}
         </fieldset>;
       })}</div>
       {error && <div><p ref={errorRef} tabIndex={-1} className="form-error" role="alert">{t(error)}</p><button className="text-button" disabled={busy} onClick={requestReload}>{t("Обновить попытку с сервера")}</button></div>}

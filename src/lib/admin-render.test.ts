@@ -7,7 +7,7 @@ import { AdminUserList } from '@/components/account-admin-users';
 import type { AdminAuditEvent, AdminUser } from './account-admin';
 import type { Account } from './account-api';
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), usePathname: () => '/account/admin/' }));
 
 describe('admin rendering boundaries', () => {
   it('only offers the administrator section with a server capability, separate from normal roles', () => {

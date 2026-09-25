@@ -3,16 +3,19 @@
 import { useI18n } from './locale-provider';
 import { localeTag } from '@/lib/i18n';
 
-import { useCallback, useId, useRef, useState } from 'react';
+import { Suspense, useCallback, useId, useRef, useState } from 'react';
+import { usePathname } from 'next/navigation';
+import { TestEditorPage } from './test-editor-page';
 import { ClipboardList } from 'lucide-react';
 import { accountApi, type AccountRole } from '@/lib/account-api';
-import { ATTEMPT_LABELS, type AttemptMutation, type TestAssignment, type TestAttemptSummary } from '@/lib/account-tests';
+import { ATTEMPT_LABELS, type AttemptMutation, type TestAssignment } from '@/lib/account-tests';
 import { ActionFeedback, ConnectionHeading, PageContent } from './account-connections';
 import { useAccountPage, useConnectionActions } from './account-connections-state';
 import { TeacherTestLibrary } from './account-tests-library';
 import { TeacherAttemptReview } from './account-tests-review';
 import { TestAttemptRunner } from './test-attempt-runner';
 import { Modal } from './ui';
+import { TestResultSummary } from './test-result-summary';
 
 interface AccountTestsProps { accountId: string; role: AccountRole; onSessionChanged: () => void }
 
@@ -20,6 +23,10 @@ export function AccountTests(props: AccountTestsProps) {
   const { t } = useI18n();
   const id = useId();
   const [revision, setRevision] = useState(0);
+  const pathname = usePathname();
+  if (pathname?.replace(/\/$/, '') === '/account/tests/new' || pathname?.replace(/\/$/, '') === '/account/tests/edit') {
+    return <Suspense fallback={<p role="status">{t("Загружаем тест…")}</p>}><TestEditorPage {...props} /></Suspense>;
+  }
   return <section className="account-tests" aria-labelledby={`${id}-title`}>
     <div className="account-section-heading"><div className="subject-icon"><ClipboardList size={24} aria-hidden="true" /></div><div><h2 id={`${id}-title`}>{t("Тесты и результаты")}</h2><p className="muted">{props.role === 'teacher' ? t("Ваши вопросы, проверка знаний и обратная связь.") : props.role === 'parent' ? t("Опубликованные результаты детей по всем предметам.") : t("Назначенные тесты, попытки и обратная связь преподавателей.")}</p></div></div>
     {props.role === 'teacher' && <TeacherTestLibrary accountId={props.accountId} onSessionChanged={props.onSessionChanged} onAssigned={() => setRevision(value => value + 1)} />}
@@ -50,11 +57,11 @@ function Assignments({ accountId, role, onSessionChanged }: AccountTestsProps) {
       <ul className="account-test-assignment-list">{page.items.map(assignment => {
         const attempts = role === 'parent' ? assignment.attempts.filter(attempt => attempt.status === 'published') : assignment.attempts;
         const current = attempts.find(attempt => attempt.status === 'started');
-        return <li key={assignment.id}><div className="test-assignment-heading"><div><h3>{assignment.title}</h3><p>{assignment.subjectName} · {role === 'teacher' ? assignment.studentName : role === 'parent' ? `${assignment.studentName} · ${assignment.teacherName}` : assignment.teacherName}</p><small>{t("Версия ")}{assignment.versionNumber}{role !== 'parent' ? t(" · использовано попыток {length} из {maxAttempts}", { length: attempts.length, maxAttempts: assignment.maxAttempts }) : ''}</small></div>
+        return <li key={assignment.id}><div className="test-assignment-heading"><div><h3>{assignment.title}</h3><p>{assignment.subjectName} · {role === 'teacher' ? assignment.studentName : role === 'parent' ? `${assignment.studentName} · ${assignment.teacherName}` : assignment.teacherName}</p><small>{t('Вариант {code} · версия {number}', { code: assignment.variantCode, number: assignment.versionNumber })}{role !== 'parent' ? t(" · использовано попыток {length} из {maxAttempts}", { length: attempts.length, maxAttempts: assignment.maxAttempts }) : ''}</small>{assignment.groupName && <p className="muted">{t('Группа: {name}', { name: assignment.groupName })}</p>}</div>
           {role === 'student' && <div className="test-assignment-actions">{current ? <button className="button" disabled={actions.busy} onClick={() => setAttemptId(current.id)}>{t("Продолжить")}</button> : attempts.length < assignment.maxAttempts ? <button className="button" disabled={actions.busy} onClick={() => setStarting(assignment)}>{attempts.length ? t("Новая попытка") : t("Начать тест")}</button> : <span className="status">{t("Попытки использованы")}</span>}</div>}
         </div>
         {role !== 'parent' && <p className="test-assignment-settings">{assignment.timeLimitMin ? t("{timeLimitMin} мин. на попытку", { timeLimitMin: assignment.timeLimitMin }) : t("Без ограничения времени")}{assignment.dueAt ? t(" · срок сдачи {value}", { value: dateTime(assignment.dueAt) }) : t(" · без срока сдачи")}{assignment.isLate && <strong> {t(" · срок сдачи прошёл")}</strong>}</p>}
-        {attempts.length ? <ol className="test-attempt-list">{attempts.map(attempt => <li key={attempt.id}><div><h4>{t("Попытка ")}{attempt.number}</h4><p className="muted">{t(ATTEMPT_LABELS[attempt.status])} · {dateTime(attempt.startedAt)}</p><AttemptScore attempt={attempt} />{attempt.comment && <p className="test-preserve-text">{attempt.comment}</p>}</div>
+        {attempts.length ? <ol className="test-attempt-list">{attempts.map(attempt => <li key={attempt.id}><div><h4>{t("Попытка ")}{attempt.number}</h4><p className="muted">{t(ATTEMPT_LABELS[attempt.status])} · {dateTime(attempt.startedAt)}</p><TestResultSummary attempt={attempt} teacher={role === 'teacher'} />{attempt.comment && (role === 'teacher' || attempt.resultVisibility === 'visible') && <p className="test-preserve-text">{attempt.comment}</p>}</div>
           {role !== 'parent' && <button className="text-button" disabled={actions.busy} onClick={() => setAttemptId(attempt.id)}>{role === 'teacher' && attempt.status === 'waiting_review' ? t("Проверить ответы") : role === 'teacher' && attempt.status === 'completed' ? t("Проверить и опубликовать") : attempt.status === 'started' && role === 'student' ? t("Продолжить") : t("Открыть попытку")}</button>}
         </li>)}</ol> : <p className="account-list-help muted">{t("Ученик ещё не начинал тест.")}</p>}
       </li>; })}</ul>
@@ -63,12 +70,6 @@ function Assignments({ accountId, role, onSessionChanged }: AccountTestsProps) {
     {attemptId && role === 'teacher' && <TeacherAttemptReview key={attemptId} accountId={accountId} attemptId={attemptId} onSessionChanged={onSessionChanged} onClose={() => setAttemptId(null)} onChanged={page.reload} />}
     {attemptId && role === 'student' && <TestAttemptRunner key={attemptId} accountId={accountId} attemptId={attemptId} onSessionChanged={onSessionChanged} onClose={() => { setAttemptId(null); page.reload(); }} onChanged={page.reload} />}
   </section>;
-}
-
-function AttemptScore({ attempt }: { attempt: TestAttemptSummary }) {
-  const { t } = useI18n();
-  if (attempt.score === undefined) return null;
-  return <p className="test-score">{attempt.status === 'waiting_review' ? t("Автоматическая часть: ") : ''}{attempt.score} / {attempt.maxPoints} {t(" балл.")}{attempt.status !== 'waiting_review' && attempt.percentage !== undefined ? ` · ${attempt.percentage}%` : ''}{attempt.passed === undefined ? '' : attempt.passed ? t(" · проходной балл набран") : t(" · проходной балл не набран")}</p>;
 }
 
 function dateTime(value: string) { return new Date(value).toLocaleString(localeTag(), { dateStyle: 'medium', timeStyle: 'short' }); }

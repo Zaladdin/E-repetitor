@@ -7,6 +7,7 @@ import { readConfig } from '../src/config';
 import { Database } from '../src/database';
 import { hashToken, newToken, Role } from '../src/common';
 import { migrate } from '../src/migrate';
+import { resetTestDatabase } from './reset-database';
 import { NotificationMail, NotificationMailDelivery } from '../src/notifications.mail';
 import { NotificationsWorker } from '../src/notifications.worker';
 import { notifyLesson } from '../src/notifications.events';
@@ -26,7 +27,7 @@ describe('PostgreSQL notifications and durable email queue', { concurrency: fals
     app = await createApp(readConfig({ ...process.env, DATABASE_URL: url, WEB_ORIGIN: origin, NODE_ENV: 'test', NOTIFICATION_WORKER_ENABLED: 'false' }), { send: async () => undefined }, mail);
     await app.listen(0, '127.0.0.1'); base = `${await app.getUrl()}/api/v1`; db = app.get(Database); worker = app.get(NotificationsWorker);
   });
-  beforeEach(async () => { await db.query('TRUNCATE users, rate_limits CASCADE'); mail.messages = []; mail.fail = false; });
+  beforeEach(async () => { await resetTestDatabase(db); mail.messages = []; mail.fail = false; });
   after(async () => { if (app) await app.close(); });
   async function account(role: Role) {
     const userId = randomUUID(); const profileId = randomUUID(); const sessionId = randomUUID(); const token = newToken();
@@ -67,7 +68,8 @@ describe('PostgreSQL notifications and durable email queue', { concurrency: fals
   async function version(c: Context) {
     const testId = randomUUID(); const versionId = randomUUID(); const questionId = randomUUID();
     const questions = JSON.stringify([{ id: questionId, type: 'text', prompt: 'PRIVATE QUESTION', points: 10, options: [], correctOptionIds: [] }]);
-    await db.query(`INSERT INTO tests(id,teacher_id,subject_id,request_id,request_payload,title,questions,status) VALUES($1,$2,$3,$4,'{}','Тест',$5,'published')`, [testId, c.teacher.profileId, c.subject, randomUUID(), questions]);
+    await db.query("INSERT INTO test_families(id,teacher_id,subject_id,title) VALUES($1,$2,$3,'Тест')", [testId, c.teacher.profileId, c.subject]);
+    await db.query(`INSERT INTO tests(id,family_id,teacher_id,subject_id,request_id,request_payload,title,questions,status) VALUES($1,$1,$2,$3,$4,'{}','Тест',$5,'published')`, [testId, c.teacher.profileId, c.subject, randomUUID(), questions]);
     await db.query(`INSERT INTO test_versions(id,test_id,teacher_id,subject_id,number,draft_revision,title,instruction,questions,max_points) VALUES($1,$2,$3,$4,1,1,'Тест','PRIVATE INSTRUCTION',$5,10)`, [versionId, testId, c.teacher.profileId, c.subject, questions]);
     return { versionId, questionId };
   }

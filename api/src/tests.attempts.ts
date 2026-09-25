@@ -6,7 +6,7 @@ import { Database } from './database';
 import { notifyResult } from './notifications.events';
 import { AttemptMutationView, AttemptQueryDto, AttemptVersionDto, AttemptView, ReviewAttemptDto, SaveAnswersDto, StartAttemptDto } from './tests.dto';
 import { AssignmentRow, TestAssignmentsService } from './tests.assignments';
-import { AttemptRow, attemptEvent, attemptSummary, closedGrades, conflictTest, expireAttempt, invalidTest, iso, missingTest, staleTest, testProfile, validateAnswers } from './tests.shared';
+import { AttemptRow, attemptEvent, attemptSummary, closedGrades, conflictTest, expireAttempt, invalidTest, iso, missingTest, resultVisibility, staleTest, testProfile, validateAnswers } from './tests.shared';
 
 const mutation = (a: AttemptRow): AttemptMutationView => ({ id: a.id, status: a.status, version: a.version });
 const expiredError = () => new ApiError(409, 'attempt_expired', 'Время попытки истекло. Ответы сохранены, но отправить их уже нельзя.');
@@ -59,12 +59,12 @@ export class TestAttemptsService {
       const keys = query.role === 'teacher' || (query.role === 'student' && submitted.has(attempt.status) &&
         (assignment.answer_policy === 'after_submission' || assignment.answer_policy === 'after_teacher_publish' && attempt.status === 'published'
           || assignment.answer_policy === 'after_deadline' && assignment.due_at !== null && new Date(assignment.due_at) <= clock));
-      return { ...attemptSummary(attempt, query.role, assignment.pass_points), assignmentId: assignment.id, title: assignment.title,
+      return { ...attemptSummary(attempt, query.role, assignment.pass_points, assignment.questions, assignment.result_policy), assignmentId: assignment.id, title: assignment.title,
         instruction: assignment.instruction, ...(assignment.topic === null ? {} : { topic: assignment.topic }), studentName: assignment.student_name,
-        subjectName: assignment.subject_name, teacherName: assignment.teacher_name, answerPolicy: assignment.answer_policy, serverNow: iso(clock),
+        subjectName: assignment.subject_name, teacherName: assignment.teacher_name, answerPolicy: assignment.answer_policy, resultPolicy: assignment.result_policy, serverNow: iso(clock),
         ...(query.role === 'parent' ? {} : { questions: assignment.questions.map(q => ({ id: q.id, type: q.type, prompt: q.prompt, points: q.points, options: q.options,
           ...(keys ? { correctOptionIds: q.correctOptionIds, ...(q.explanation === undefined ? {} : { explanation: q.explanation }) } : {}) })), answers: attempt.answers,
-        ...(query.role === 'teacher' || attempt.status === 'published' ? { grades: attempt.grades } : {}) }) };
+        ...(query.role === 'teacher' || resultVisibility(attempt, query.role, assignment.result_policy) === 'visible' ? { grades: attempt.grades } : {}) }) };
     });
   }
   private async write(req: ApiRequest, id: string, role: 'teacher' | 'student', operation: (client: PoolClient, user: string, assignment: AssignmentRow, attempt: AttemptRow) => Promise<AttemptMutationView | ApiError>): Promise<AttemptMutationView> {

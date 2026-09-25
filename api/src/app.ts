@@ -25,7 +25,7 @@ import { LessonsController } from './lessons.controllers';
 import { TestsService } from './tests';
 import { TestAssignmentsService } from './tests.assignments';
 import { TestAttemptsService } from './tests.attempts';
-import { TestAssignmentsController, TestAttemptsController, TestsController, TestVersionsController } from './tests.controllers';
+import { TestAssignmentsController, TestAttemptsController, TestFamiliesController, TestGroupAssignmentsController, TestsController, TestVersionsController } from './tests.controllers';
 import { PaymentsService } from './payments';
 import { PaymentsController } from './payments.controllers';
 import { OverviewService } from './overview';
@@ -44,7 +44,7 @@ import { GroupsController } from './groups.controllers';
 export async function createApp(config: Config, mail?: MailDelivery, notificationMail?: NotificationMailDelivery) {
   const web = config.serveWeb ? await createWebMiddleware(resolve(__dirname, '../../../.local/web'), config.production) : undefined;
   @Module({
-    controllers: [AuthController, AccountController, SubjectsController, HealthController, EnrollmentsController, ParentConnectionsController, ParentChildrenController, TemporaryStudentsController, InvitationsController, LessonsController, TestsController, TestVersionsController, TestAssignmentsController, TestAttemptsController, PaymentsController, OverviewController, NotificationsController, NotificationPreferencesController, AdminController, PackagesController, GroupsController],
+    controllers: [AuthController, AccountController, SubjectsController, HealthController, EnrollmentsController, ParentConnectionsController, ParentChildrenController, TemporaryStudentsController, InvitationsController, LessonsController, TestsController, TestFamiliesController, TestVersionsController, TestAssignmentsController, TestGroupAssignmentsController, TestAttemptsController, PaymentsController, OverviewController, NotificationsController, NotificationPreferencesController, AdminController, PackagesController, GroupsController],
     providers: [{ provide: CONFIG, useValue: config }, Database, AccountsService, AuthService, SessionGuard, ConnectionsService, InvitationsService, LessonsService, TestsService, TestAssignmentsService, TestAttemptsService, PaymentsService, OverviewService, NotificationsService, NotificationsWorker, AdminService, PackagesService, GroupsService,
       { provide: NOTIFICATION_MAIL, ...(notificationMail ? { useValue: notificationMail } : { useClass: NotificationSmtpMail }) },
       { provide: MAIL, ...(mail ? { useValue: mail } : { useClass: SmtpMail }) },

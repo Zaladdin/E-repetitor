@@ -5,7 +5,7 @@ import { ConnectionPageDto } from './connections.dto';
 import { TestAssignmentsService } from './tests.assignments';
 import { TestAttemptsService } from './tests.attempts';
 import { TestsService } from './tests';
-import { AssignmentPage, AssignmentQueryDto, AssignmentView, AttemptMutationView, AttemptQueryDto, AttemptVersionDto, AttemptView, CreateAssignmentDto, CreateTestDto, ReviewAttemptDto, SaveAnswersDto, StartAttemptDto, TestDetail, TestPage, TestRevisionDto, TestVersion, TestVersionPage, UpdateTestDto } from './tests.dto';
+import { AssignmentPage, AssignmentQueryDto, AssignmentView, AttemptMutationView, AttemptQueryDto, AttemptVersionDto, AttemptView, CreateAssignmentDto, CreateGroupAssignmentDto, CreateTestDto, CreateTestVariantDto, GroupAssignmentView, ReviewAttemptDto, SaveAnswersDto, StartAttemptDto, TestDetail, TestFamilyPage, TestPage, TestRevisionDto, TestVersion, TestVersionPage, UpdateTestDto } from './tests.dto';
 
 const uuid = () => new ParseUUIDPipe({ version: '4' });
 @ApiTags('Tests') @ApiCookieAuth() @UseGuards(SessionGuard) @Controller('tests')
@@ -25,6 +25,22 @@ export class TestsController {
   archive(@Req() req: ApiRequest, @Param('id', uuid()) id: string, @Body() dto: TestRevisionDto) { return this.tests.archive(req, id, dto); }
   @Get(':id/versions') @ApiOkResponse({ type: TestVersionPage })
   versions(@Req() req: ApiRequest, @Param('id', uuid()) id: string, @Query() query: ConnectionPageDto) { return this.tests.versions(req.userId!, id, query); }
+  @Get(':id/variants') @ApiOkResponse({ type: TestPage })
+  variants(@Req() req: ApiRequest, @Param('id', uuid()) id: string, @Query() query: ConnectionPageDto) { return this.tests.variants(req.userId!, id, query); }
+  @Post(':id/variants') @ApiCreatedResponse({ type: TestDetail }) @ApiOperation({ summary: 'Clone the selected draft into an independent named variant in the same family. Does not publish.' })
+  createVariant(@Req() req: ApiRequest, @Param('id', uuid()) id: string, @Body() dto: CreateTestVariantDto) { return this.tests.createVariant(req, id, dto); }
+}
+@ApiTags('Tests') @ApiCookieAuth() @UseGuards(SessionGuard) @Controller('test-families')
+export class TestFamiliesController {
+  constructor(private readonly tests: TestsService) {}
+  @Get() @ApiOkResponse({ type: TestFamilyPage })
+  list(@Req() req: ApiRequest, @Query() query: ConnectionPageDto) { return this.tests.families(req.userId!, query); }
+}
+@ApiTags('Test assignments') @ApiCookieAuth() @UseGuards(SessionGuard) @Controller('test-group-assignments')
+export class TestGroupAssignmentsController {
+  constructor(private readonly assignments: TestAssignmentsService) {}
+  @Post() @ApiCreatedResponse({ type: GroupAssignmentView }) @ApiOperation({ summary: 'Atomically assign one immutable variant version to a snapshot of active group members. Retries retain the original recipients.' })
+  create(@Req() req: ApiRequest, @Body() dto: CreateGroupAssignmentDto) { return this.assignments.createGroup(req, dto); }
 }
 @ApiTags('Tests') @ApiCookieAuth() @UseGuards(SessionGuard) @Controller('test-versions')
 export class TestVersionsController {
@@ -45,7 +61,7 @@ export class TestAssignmentsController {
 @ApiTags('Test attempts') @ApiCookieAuth() @UseGuards(SessionGuard) @Controller('attempts')
 export class TestAttemptsController {
   constructor(private readonly attempts: TestAttemptsService) {}
-  @Get(':id') @ApiOkResponse({ type: AttemptView }) @ApiOperation({ summary: 'Explicit role projection. Student keys follow the answer policy; scores wait for teacher publication. Parents never receive answers or keys.' })
+  @Get(':id') @ApiOkResponse({ type: AttemptView }) @ApiOperation({ summary: 'Explicit role projection. Keys follow answerPolicy; final student results follow resultPolicy. Parents only see published totals and never answers or keys.' })
   get(@Req() req: ApiRequest, @Param('id', uuid()) id: string, @Query() query: AttemptQueryDto) { return this.attempts.get(req, id, query); }
   @Patch(':id/answers') @ApiOkResponse({ type: AttemptMutationView }) @ApiOperation({ summary: 'Replace saved answers with version CAS before timer expiration. No client grades accepted.' })
   save(@Req() req: ApiRequest, @Param('id', uuid()) id: string, @Body() dto: SaveAnswersDto) { return this.attempts.save(req, id, dto); }

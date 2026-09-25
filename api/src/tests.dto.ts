@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayUnique, IsArray, IsIn, IsInt, IsNumber, IsObject, IsString, IsUUID, Length, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayUnique, IsArray, IsIn, IsInt, IsNumber, IsObject, IsString, IsUUID, Length, Matches, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 import { ConnectionPageDto } from './connections.dto';
 
 const optional = (_object: unknown, value: unknown) => value !== undefined;
@@ -8,6 +8,8 @@ const trim = ({ value }: { value: unknown }) => typeof value === 'string' ? valu
 export type TestStatus = 'draft' | 'published' | 'archived';
 export type AttemptStatus = 'started' | 'submitted' | 'waiting_review' | 'completed' | 'published' | 'expired' | 'abandoned';
 export type AnswerPolicy = 'never' | 'after_submission' | 'after_deadline' | 'after_teacher_publish';
+export type ResultPolicy = 'after_submission' | 'after_teacher_publish';
+export type ResultVisibility = 'visible' | 'pending_review' | 'pending_publication' | 'unavailable';
 export class QuestionOption {
   @ApiProperty({ format: 'uuid' }) @IsUUID('4') id!: string;
   @ApiProperty({ maxLength: 300 }) @IsString() @MaxLength(300) text!: string;
@@ -38,6 +40,10 @@ export class UpdateTestDto extends TestDraftDto {
 export class TestRevisionDto {
   @ApiProperty({ minimum: 1 }) @IsInt() @Min(1) @Max(2147483646) revision!: number;
 }
+export class CreateTestVariantDto {
+  @ApiProperty({ format: 'uuid' }) @IsUUID('4') requestId!: string;
+  @ApiProperty({ pattern: '^[A-Z]$' }) @IsString() @Matches(/^[A-Z]$/) variantCode!: string;
+}
 export class CreateAssignmentDto {
   @ApiProperty({ format: 'uuid' }) @IsUUID('4') requestId!: string;
   @ApiProperty({ format: 'uuid' }) @IsUUID('4') versionId!: string;
@@ -46,6 +52,10 @@ export class CreateAssignmentDto {
   @ApiPropertyOptional({ minimum: 1, maximum: 180 }) @ValidateIf(optional) @IsInt() @Min(1) @Max(180) timeLimitMin?: number;
   @ApiPropertyOptional({ format: 'date-time' }) @ValidateIf(optional) @IsString() @MaxLength(40) dueAt?: string;
   @ApiPropertyOptional({ enum: ['never', 'after_submission', 'after_deadline', 'after_teacher_publish'], default: 'never' }) @IsIn(['never', 'after_submission', 'after_deadline', 'after_teacher_publish']) answerPolicy: AnswerPolicy = 'never';
+  @ApiPropertyOptional({ enum: ['after_submission', 'after_teacher_publish'], default: 'after_teacher_publish' }) @IsIn(['after_submission', 'after_teacher_publish']) resultPolicy: ResultPolicy = 'after_teacher_publish';
+}
+export class CreateGroupAssignmentDto extends OmitType(CreateAssignmentDto, ['enrollmentId'] as const) {
+  @ApiProperty({ format: 'uuid' }) @IsUUID('4') groupId!: string;
 }
 export class AssignmentQueryDto extends ConnectionPageDto {
   @ApiProperty({ enum: ['teacher', 'student', 'parent'] }) @IsIn(['teacher', 'student', 'parent']) role!: 'teacher' | 'student' | 'parent';
@@ -80,6 +90,8 @@ export class ReviewAttemptDto extends AttemptVersionDto {
 export class TestVersionSummary {
   @ApiProperty() id!: string;
   @ApiProperty() testId!: string;
+  @ApiProperty() familyId!: string;
+  @ApiProperty() variantCode!: string;
   @ApiProperty() number!: number;
   @ApiProperty() title!: string;
   @ApiProperty() maxPoints!: number;
@@ -93,6 +105,8 @@ export class LatestTestVersionView {
 }
 export class TestSummary {
   @ApiProperty() id!: string;
+  @ApiProperty() familyId!: string;
+  @ApiProperty() variantCode!: string;
   @ApiProperty() subjectId!: string;
   @ApiProperty() subjectName!: string;
   @ApiProperty() title!: string;
@@ -122,6 +136,19 @@ export class TestPage {
   @ApiProperty() limit!: number;
   @ApiProperty() offset!: number;
 }
+export class TestFamilyView {
+  @ApiProperty() id!: string;
+  @ApiProperty() title!: string;
+  @ApiProperty() subjectId!: string;
+  @ApiProperty() subjectName!: string;
+  @ApiProperty({ type: [TestSummary] }) variants!: TestSummary[];
+}
+export class TestFamilyPage {
+  @ApiProperty({ type: [TestFamilyView] }) items!: TestFamilyView[];
+  @ApiProperty() total!: number;
+  @ApiProperty() limit!: number;
+  @ApiProperty() offset!: number;
+}
 export class TestVersionPage {
   @ApiProperty({ type: [TestVersionSummary] }) items!: TestVersionSummary[];
   @ApiProperty() total!: number;
@@ -139,6 +166,9 @@ export class AttemptSummary {
   @ApiPropertyOptional() publishedAt?: string;
   @ApiPropertyOptional() score?: number;
   @ApiProperty() maxPoints!: number;
+  @ApiProperty() totalQuestions!: number;
+  @ApiPropertyOptional() correctAnswers?: number;
+  @ApiProperty({ enum: ['visible', 'pending_review', 'pending_publication', 'unavailable'] }) resultVisibility!: ResultVisibility;
   @ApiPropertyOptional() passPoints?: number;
   @ApiPropertyOptional() passed?: boolean;
   @ApiPropertyOptional() percentage?: number;
@@ -147,6 +177,10 @@ export class AttemptSummary {
 export class AssignmentView {
   @ApiProperty() id!: string;
   @ApiProperty() testId!: string;
+  @ApiProperty() familyId!: string;
+  @ApiProperty() variantCode!: string;
+  @ApiPropertyOptional() groupId?: string;
+  @ApiPropertyOptional() groupName?: string;
   @ApiProperty() versionId!: string;
   @ApiProperty() versionNumber!: number;
   @ApiProperty() title!: string;
@@ -159,9 +193,16 @@ export class AssignmentView {
   @ApiPropertyOptional() timeLimitMin?: number;
   @ApiPropertyOptional() dueAt?: string;
   @ApiProperty() answerPolicy!: AnswerPolicy;
+  @ApiProperty() resultPolicy!: ResultPolicy;
   @ApiProperty() createdAt!: string;
   @ApiProperty() isLate!: boolean;
   @ApiProperty({ type: [AttemptSummary] }) attempts!: AttemptSummary[];
+}
+export class GroupAssignmentView {
+  @ApiProperty({ type: [AssignmentView] }) items!: AssignmentView[];
+  @ApiProperty() total!: number;
+  @ApiProperty() groupId!: string;
+  @ApiProperty() groupName!: string;
 }
 export class AssignmentPage {
   @ApiProperty({ type: [AssignmentView] }) items!: AssignmentView[];
@@ -183,10 +224,11 @@ export class AttemptView extends AttemptSummary {
   @ApiProperty() subjectName!: string;
   @ApiProperty() teacherName!: string;
   @ApiProperty() answerPolicy!: AnswerPolicy;
+  @ApiProperty() resultPolicy!: ResultPolicy;
   @ApiProperty() serverNow!: string;
   @ApiPropertyOptional({ type: [PublicQuestionView], description: 'Absent for parents. Correct keys and explanations withheld from students until answer policy permits.' }) questions?: PublicQuestion[];
   @ApiPropertyOptional({ type: [Answer] }) answers?: Answer[];
-  @ApiPropertyOptional({ type: [Grade], description: 'Student: published results only. Never returned to parents.' }) grades?: Grade[];
+  @ApiPropertyOptional({ type: [Grade], description: 'Student: final results released by resultPolicy. Never returned to parents.' }) grades?: Grade[];
 }
 export class AttemptMutationView {
   @ApiProperty() id!: string;

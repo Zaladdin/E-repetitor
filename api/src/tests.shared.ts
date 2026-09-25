@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { ApiError, Role, audit } from './common';
-import { Answer, AttemptStatus, AttemptSummary, Grade, Question, TestDraftDto, TestStatus } from './tests.dto';
+import { Answer, AttemptStatus, AttemptSummary, Grade, Question, ResultPolicy, ResultVisibility, TestDraftDto, TestStatus } from './tests.dto';
 
 export const missingTest = () => new ApiError(404, 'not_found', 'Тест, назначение или попытка недоступны.');
 export const invalidTest = (message = 'Проверьте вопросы и параметры теста.') => new ApiError(400, 'validation_error', message);
@@ -38,22 +38,39 @@ export function validateQuestions(questions: Question[], published: boolean) {
   }
 }
 export const maxPoints = (questions: Question[]) => questions.reduce((sum, q) => sum + q.points, 0);
-export type TestRow = { id: string; teacher_id: string; subject_id: string; subject_name: string; title: string; instruction: string; topic: string | null;
+export type TestRow = { id: string; family_id: string; variant_code: string; teacher_id: string; subject_id: string; subject_name: string; title: string; instruction: string; topic: string | null;
   pass_points: string | null; questions: Question[]; status: TestStatus; revision: number; updated_at: Date; latest_id: string | null; latest_number: number | null; latest_at: Date | null };
-export const testSelect = `SELECT t.*,s.name AS subject_name,v.id AS latest_id,v.number AS latest_number,v.published_at AS latest_at
-  FROM tests t JOIN subjects s ON s.id=t.subject_id LEFT JOIN LATERAL
+export type TestSummaryRow = Omit<TestRow, 'questions' | 'instruction'> & { question_count: number; question_max_points: number };
+const testJoins = `FROM tests t JOIN subjects s ON s.id=t.subject_id LEFT JOIN LATERAL
   (SELECT id,number,published_at FROM test_versions WHERE test_id=t.id ORDER BY number DESC LIMIT 1) v ON true`;
+export const testSelect = `SELECT t.*,s.name AS subject_name,v.id AS latest_id,v.number AS latest_number,v.published_at AS latest_at ${testJoins}`;
+// Family pages contain up to 26 variants each. Keep question bodies and keys out
+// of the listing query, not only out of its public projection.
+export const testSummarySelect = `SELECT t.id,t.family_id,t.variant_code,t.teacher_id,t.subject_id,t.title,t.topic,t.pass_points,t.status,t.revision,t.updated_at,
+  s.name AS subject_name,v.id AS latest_id,v.number AS latest_number,v.published_at AS latest_at,
+  jsonb_array_length(t.questions) AS question_count,
+  coalesce((SELECT sum((q->>'points')::int)::int FROM jsonb_array_elements(t.questions) q),0) AS question_max_points ${testJoins}`;
 export type AttemptRow = { id: string; assignment_id: string; student_id: string; number: number; status: AttemptStatus; version: number;
   started_at: Date; expires_at: Date | null; submitted_at: Date | null; published_at: Date | null; answers: Answer[]; grades: Grade[];
   score: string | null; max_points: number; comment: string | null };
-export function attemptSummary(a: AttemptRow, role: Role, passPoints: string | null): AttemptSummary {
-  const reveal = role === 'teacher' || a.status === 'published';
+export const DEFAULT_TEST_PASS_PERCENTAGE = 60;
+export function resultVisibility(a: AttemptRow, role: Role, policy: ResultPolicy): ResultVisibility {
+  if (a.status === 'submitted' || a.status === 'waiting_review') return 'pending_review';
+  if (!['completed', 'published'].includes(a.status)) return 'unavailable';
+  return role === 'teacher' || a.status === 'published' || role === 'student' && policy === 'after_submission' ? 'visible' : 'pending_publication';
+}
+export function attemptSummary(a: AttemptRow, role: Role, passPoints: string | null, questions: Question[], policy: ResultPolicy): AttemptSummary {
+  const visibility = resultVisibility(a, role, policy);
+  const final = visibility === 'visible';
+  const reveal = role === 'teacher' || final;
   const score = a.score === null ? undefined : Number(a.score);
+  const threshold = passPoints === null ? Math.round(a.max_points * DEFAULT_TEST_PASS_PERCENTAGE) / 100 : Number(passPoints);
   return { id: a.id, number: a.number, status: a.status, version: a.version, startedAt: iso(a.started_at), maxPoints: a.max_points,
+    totalQuestions: questions.length, resultVisibility: visibility,
     ...(a.expires_at ? { expiresAt: iso(a.expires_at) } : {}), ...(a.submitted_at ? { submittedAt: iso(a.submitted_at) } : {}),
-    ...(a.published_at ? { publishedAt: iso(a.published_at) } : {}), ...(passPoints !== null ? { passPoints: Number(passPoints) } : {}),
+    ...(a.published_at ? { publishedAt: iso(a.published_at) } : {}), passPoints: threshold,
     ...(reveal && score !== undefined ? { score, percentage: Math.round(score / a.max_points * 10000) / 100,
-      ...(passPoints !== null && ['completed', 'published'].includes(a.status) ? { passed: score >= Number(passPoints) } : {}) } : {}),
+      ...(final ? { passed: score >= threshold, correctAnswers: questions.filter(q => a.grades.some(g => g.questionId === q.id && g.points === q.points)).length } : {}) } : {}),
     ...(reveal && a.comment !== null ? { comment: a.comment } : {}) };
 }
 export function validateAnswers(answers: Answer[], questions: Question[]): Answer[] {
